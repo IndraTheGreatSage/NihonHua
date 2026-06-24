@@ -13,7 +13,9 @@ data class UserProfile(
     val commentCount: Int = 0,
     val isPremium: Boolean = false,
     val premiumExpiration: Long = 0L,
-    val watchingList: String = "" // Comma-separated anime IDs
+    val watchingList: String = "", // Comma-separated anime IDs
+    val exp: Int = 0, // Experience points
+    val lastAdWatchTime: Long = 0L // Timestamp of last ad watched
 )
 
 @Entity(tableName = "comments")

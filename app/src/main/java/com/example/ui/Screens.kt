@@ -713,12 +713,12 @@ fun DashboardScreen(viewModel: AnimeViewModel) {
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 16.dp)
         ) {
-            // Hero Banner Section
+            // Hero Banner Section (matching image design)
             item {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(220.dp)
+                        .height(280.dp)
                 ) {
                     AsyncImage(
                         model = "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=800&q=80",
@@ -733,7 +733,7 @@ fun DashboardScreen(viewModel: AnimeViewModel) {
                                 Brush.verticalGradient(
                                     colors = listOf(
                                         Color.Transparent,
-                                        Color.Black.copy(alpha = 0.85f)
+                                        Color.Black.copy(alpha = 0.9f)
                                     )
                                 )
                             )
@@ -742,33 +742,61 @@ fun DashboardScreen(viewModel: AnimeViewModel) {
                     Column(
                         modifier = Modifier
                             .align(Alignment.BottomStart)
-                            .padding(16.dp)
+                            .padding(20.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                "POPULER DI ANICHIN",
-                                color = MaterialTheme.colorScheme.secondary,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier
-                                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            "Battle Through The Heavens S5",
+                            "The Heavens S5",
                             color = Color.White,
-                            fontSize = 20.sp,
+                            fontSize = 28.sp,
                             fontWeight = FontWeight.ExtraBold
                         )
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            "Xiao Yan bertarung di Akademi Jia Nan. Nikmati resolusi grafis 4K!",
-                            color = Color.LightGray,
-                            fontSize = 12.sp,
-                            maxLines = 1,
+                            "Xiao Yan journeys to the Jia Nin Academy to search for the Falling Heart Flame. A new chapter of power...",
+                            color = Color.White.copy(alpha = 0.9f),
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Button(
+                                onClick = { 
+                                    val featuredShow = shows.firstOrNull { it.id.contains("btth") }
+                                    if (featuredShow != null) viewModel.selectAnime(featuredShow)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.height(44.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.PlayArrow,
+                                    contentDescription = null,
+                                    tint = Color.Black,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Mulai Nonton", color = Color.Black, fontWeight = FontWeight.Bold)
+                            }
+                            Button(
+                                onClick = { /* Add to playlist */ },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.2f)),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.height(44.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Add,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Daftar Putar", color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
             }
@@ -914,73 +942,94 @@ fun DashboardScreen(viewModel: AnimeViewModel) {
                 selectedFilter == "Semua" || it.type.equals(selectedFilter, ignoreCase = true)
             }
 
-            // Trending Row
+            // Sedang Populer (Currently Popular) - matching image design
             item {
-                Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                Column(modifier = Modifier.padding(vertical = 12.dp)) {
                     Text(
                         text = "Sedang Populer",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground,
-                        modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp)
+                        modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp)
                     )
 
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        items(filteredShows.sortedByDescending { it.rating }) { anime ->
+                        items(filteredShows.sortedByDescending { it.rating }.take(6)) { anime ->
                             Card(
                                 modifier = Modifier
-                                    .width(140.dp)
+                                    .width(150.dp)
                                     .clickable { viewModel.selectAnime(anime) },
-                                shape = RoundedCornerShape(12.dp),
+                                shape = RoundedCornerShape(16.dp),
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                             ) {
-                                Box(modifier = Modifier.height(170.dp)) {
+                                Box(modifier = Modifier.height(200.dp)) {
                                     AsyncImage(
                                         model = anime.imageUrl,
                                         contentDescription = anime.title,
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier.fillMaxSize()
                                     )
-                                    // Rating Badge
-                                    Row(
+                                    // Rating Badge (top right)
+                                    Box(
                                         modifier = Modifier
                                             .align(Alignment.TopEnd)
-                                            .padding(6.dp)
-                                            .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
-                                            .padding(horizontal = 4.dp, vertical = 2.dp),
-                                        verticalAlignment = Alignment.CenterVertically
+                                            .padding(8.dp)
+                                            .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
                                     ) {
-                                        Icon(
-                                            Icons.Filled.Star,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.secondary,
-                                            modifier = Modifier.size(12.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(2.dp))
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                Icons.Filled.Star,
+                                                contentDescription = null,
+                                                tint = Color(0xFFFFD700),
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                anime.rating,
+                                                color = Color.White,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                    // Type Badge (bottom left)
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomStart)
+                                            .padding(8.dp)
+                                            .background(
+                                                if (anime.type == "Anime") Color(0xFF2196F3) else Color(0xFF9C27B0),
+                                                RoundedCornerShape(8.dp)
+                                            )
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
                                         Text(
-                                            anime.rating,
+                                            anime.type,
                                             color = Color.White,
                                             fontSize = 10.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
                                 }
-                                Column(modifier = Modifier.padding(8.dp)) {
+                                Column(modifier = Modifier.padding(10.dp)) {
                                     Text(
                                         text = anime.title,
                                         color = MaterialTheme.colorScheme.onBackground,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        lineHeight = 16.sp
                                     )
+                                    Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = "${anime.releaseYear} • ${anime.type}",
+                                        text = anime.releaseYear,
                                         color = MaterialTheme.colorScheme.onSurface,
-                                        fontSize = 10.sp
+                                        fontSize = 11.sp
                                     )
                                 }
                             }
@@ -989,25 +1038,25 @@ fun DashboardScreen(viewModel: AnimeViewModel) {
                 }
             }
 
-            // Latest Updates List
+            // Update Episode Terbaru (Latest Episode Update) - matching image design
             item {
                 Text(
                     text = "Update Episode Terbaru",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.padding(horizontal = 16.dp).padding(top = 16.dp, bottom = 8.dp)
+                    modifier = Modifier.padding(horizontal = 16.dp).padding(top = 16.dp, bottom = 12.dp)
                 )
             }
 
-            items(filteredShows) { anime ->
+            items(filteredShows.take(5)) { anime ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 6.dp)
                         .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp))
                         .clickable { viewModel.selectAnime(anime) }
-                        .padding(8.dp),
+                        .padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     AsyncImage(
@@ -1015,8 +1064,8 @@ fun DashboardScreen(viewModel: AnimeViewModel) {
                         contentDescription = anime.title,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
-                            .size(70.dp, 90.dp)
-                            .clip(RoundedCornerShape(8.dp))
+                            .size(60.dp, 80.dp)
+                            .clip(RoundedCornerShape(10.dp))
                     )
 
                     Spacer(modifier = Modifier.width(12.dp))
@@ -1026,47 +1075,39 @@ fun DashboardScreen(viewModel: AnimeViewModel) {
                             text = anime.title,
                             color = MaterialTheme.colorScheme.onBackground,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
+                            fontSize = 13.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = anime.description,
-                            color = MaterialTheme.colorScheme.onSurface,
+                            text = "EPISODE ${anime.episodes.size} ${if (anime.status == "Completed") "(TAMAT)" else ""}",
+                            color = MaterialTheme.colorScheme.primary,
                             fontSize = 11.sp,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(vertical = 4.dp)
+                            fontWeight = FontWeight.Bold
                         )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = anime.type,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier
-                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "EP ${anime.episodeCount}",
-                                color = MaterialTheme.colorScheme.secondary,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier
-                                    .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "${anime.type} • ${anime.releaseYear}",
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 10.sp
+                        )
                     }
 
-                    Icon(
-                        imageVector = Icons.Filled.PlayArrow,
-                        contentDescription = "Play",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(horizontal = 8.dp)
-                    )
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "5 jam yang lalu",
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                            fontSize = 10.sp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Icon(
+                            imageVector = Icons.Filled.PlayCircleFilled,
+                            contentDescription = "Play",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
                 }
             }
         }
@@ -2622,8 +2663,7 @@ fun PremiumPaymentDialog(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         val channels = listOf(
-                            Triple("QRIS", "QRIS (Semua Bank / E-Money)", Color(0xFF00E676)),
-                            Triple("DANA", "DANA (Kirim ke 082298329032)", Color(0xFF118EEA))
+                            Triple("QRIS", "QRIS (Semua Bank / E-Money)", Color(0xFF00E676))
                         )
 
                         channels.forEach { (code, name, color) ->
@@ -2655,11 +2695,7 @@ fun PremiumPaymentDialog(
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Column {
                                         Text(name, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
-                                        if (code == "QRIS") {
-                                            Text("Scan QR Code QRIS instan otomatis", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
-                                        } else {
-                                            Text("Kirim/Transfer DANA manual", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
-                                        }
+                                        Text("Scan QR Code QRIS instan otomatis", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
                                     }
                                 }
                             }
@@ -2668,54 +2704,15 @@ fun PremiumPaymentDialog(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    if (selectedMethod == "DANA") {
-                        // Display Destination DANA Box
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Color(0xFF118EEA).copy(alpha = 0.1f), RoundedCornerShape(12.dp))
-                                .border(1.dp, Color(0xFF118EEA).copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-                                .padding(12.dp)
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("NOMOR TUJUAN TRANSFER DANA", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f), fontWeight = FontWeight.Bold)
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text("0822-9832-9032", fontSize = 18.sp, fontWeight = FontWeight.Black, color = Color(0xFF118EEA))
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text("Harap transfer sesuai nominal tagihan ke nomor DANA di atas.", fontSize = 10.sp, color = Color.White.copy(alpha = 0.7f), textAlign = TextAlign.Center)
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        // Phone Number Input field
-                        OutlinedTextField(
-                            value = phoneNumber,
-                            onValueChange = { phoneNumber = it },
-                            placeholder = { Text("Contoh: 081234567890", color = Color.White.copy(alpha = 0.4f)) },
-                            label = { Text("Nomor Handphone Pengirim DANA Anda", color = Color.White.copy(alpha = 0.6f)) },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF118EEA),
-                                unfocusedBorderColor = Color.White.copy(alpha = 0.2f)
-                            )
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                    } else {
-                        // Display Dynamic QRIS code
-                        Box(
-                            modifier = Modifier
-                                .size(160.dp)
-                                .background(Color.White, RoundedCornerShape(8.dp))
-                                .padding(12.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    // Display Dynamic QRIS code
+                    Box(
+                        modifier = Modifier
+                            .size(160.dp)
+                            .background(Color.White, RoundedCornerShape(8.dp))
+                            .padding(12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 // Draw simulated QRIS scan grid
                                 Box(
                                     modifier = Modifier
@@ -3557,243 +3554,207 @@ fun UserProfileDialog(
                     }
 
                 } else {
-                    // Avatar Large glow with beautiful double border
+                    // Profile picture with circular border (matching image design)
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier.padding(top = 10.dp)
                     ) {
-                        // Glowing outer ring
-                        Box(
-                            modifier = Modifier
-                                .size(110.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    Brush.sweepGradient(
-                                        colors = if (profile.isPremium) {
-                                            listOf(Color(0xFFFFB300), Color(0xFFE53935), Color(0xFFFFB300))
-                                        } else {
-                                            listOf(Color(0xFF29B6F6), Color(0xFFAB47BC), Color(0xFF29B6F6))
-                                        }
-                                    )
-                                )
-                        )
-                        // Inner clean border background
-                        Box(
-                            modifier = Modifier
-                                .size(104.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF131722))
-                        )
-                        // The actual image
                         AsyncImage(
                             model = profile.photoUrl,
                             contentDescription = profile.displayName,
                             modifier = Modifier
-                                .size(96.dp)
+                                .size(100.dp)
                                 .clip(CircleShape)
+                                .border(3.dp, MaterialTheme.colorScheme.primary, CircleShape)
                         )
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Name
+                    // User name and email (matching image design)
                     Text(
-                        text = profile.displayName,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Black,
+                        text = "${profile.displayName} (Main Admin)",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
 
-                    // Masked email for privacy
                     Text(
-                        text = maskEmail(profile.email),
-                        fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.5f),
-                        modifier = Modifier.padding(top = 2.dp)
+                        text = profile.email,
+                        fontSize = 13.sp,
+                        color = Color.White.copy(alpha = 0.7f),
+                        modifier = Modifier.padding(top = 4.dp)
                     )
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Premium badge display with neon highlight
-                    if (profile.isPremium) {
-                        Box(
-                            modifier = Modifier
-                                .background(
-                                    Brush.horizontalGradient(listOf(Color(0xFFFFB300), Color(0xFFE53935))),
-                                    RoundedCornerShape(50.dp)
-                                )
-                                .padding(horizontal = 20.dp, vertical = 6.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Filled.Star,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    "VIP PREMIUM MEMBER",
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Black,
-                                    letterSpacing = 1.sp
-                                )
-                            }
-                        }
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .background(Color.White.copy(alpha = 0.1f), RoundedCornerShape(50.dp))
-                                .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(50.dp))
-                                .padding(horizontal = 16.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                "REGULER MEMBER",
-                                color = Color.White.copy(alpha = 0.7f),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.5.sp
+                    // VIP PREMIUM MEMBER badge (matching image design)
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                Brush.horizontalGradient(listOf(Color(0xFFFFD700), Color(0xFFFF8C00))),
+                                RoundedCornerShape(8.dp)
                             )
-                        }
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            "VIP PREMIUM MEMBER",
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp
+                        )
                     }
 
-                    Spacer(modifier = Modifier.height(24.dp))
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    // Profile analytic details - styled as grid items
+                    // Three cards: Status, EXP, Premium Status (updated design)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Stat 1: Joined
+                        // Status Card
                         Card(
                             modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.03f)),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
                         ) {
                             Column(
                                 modifier = Modifier.padding(12.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text("Bergabung", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f), fontWeight = FontWeight.Bold)
+                                Text("Status", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f), fontWeight = FontWeight.Medium)
                                 Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    simpleDate.format(Date(profile.joinDate)),
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp,
-                                    color = Color.White,
-                                    textAlign = TextAlign.Center
-                                )
+                                Text("Aktif", fontSize = 13.sp, color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold)
+                                Text("Hingga 2026", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
                             }
                         }
 
-                        // Stat 2: Watch Duration
+                        // EXP Card
                         Card(
                             modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.03f)),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
                         ) {
                             Column(
                                 modifier = Modifier.padding(12.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text("Waktu Tonton", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f), fontWeight = FontWeight.Bold)
+                                Text("EXP", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f), fontWeight = FontWeight.Medium)
                                 Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    "${profile.watchDurationMinutes} Menit",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp,
-                                    color = Color(0xFFE53935)
-                                )
+                                Text(profile.exp.toString(), fontSize = 13.sp, color = Color(0xFF9C27B0), fontWeight = FontWeight.Bold)
+                                Text("Points", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
                             }
                         }
 
-                        // Stat 3: Comments Count
+                        // Premium Status Card
                         Card(
                             modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.03f)),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = if (profile.isPremium) Color(0xFFFFD700).copy(alpha = 0.2f) else Color(0xFF1E1E1E))
                         ) {
                             Column(
                                 modifier = Modifier.padding(12.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text("Komentar", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f), fontWeight = FontWeight.Bold)
+                                Text("Premium", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f), fontWeight = FontWeight.Medium)
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    profile.commentCount.toString(),
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp,
-                                    color = Color(0xFFFFB300)
+                                    if (profile.isPremium) "YES" else "NO",
+                                    fontSize = 13.sp,
+                                    color = if (profile.isPremium) Color(0xFFFFD700) else Color(0xFF757575),
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    if (profile.isPremium) "No Ads" else "With Ads",
+                                    fontSize = 10.sp,
+                                    color = Color.White.copy(alpha = 0.5f)
                                 )
                             }
                         }
                     }
 
-                    // Currently Watching List
-                    if (profile.watchingList.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Text(
-                            "Sedang Ditonton:",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            color = Color.White,
-                            modifier = Modifier.align(Alignment.Start)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Column(
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // SEDANG DITONTON section (matching image design)
+                    Text(
+                        "SEDANG DITONTON",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        modifier = Modifier.align(Alignment.Start)
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Currently watching card
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF1E1E1E), RoundedCornerShape(12.dp)),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
+                    ) {
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(Color.White.copy(alpha = 0.02f), RoundedCornerShape(12.dp))
-                                .border(1.dp, Color.White.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
-                                .padding(12.dp)
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            profile.watchingList.split(",").forEach { id ->
-                                val title = when (id) {
-                                    "btth_s5" -> "Battle Through The Heavens S5"
-                                    "renegade_immortal" -> "Renegade Immortal"
-                                    "perfect_world" -> "Perfect World"
-                                    "shrouding_the_heavens" -> "Shrouding the Heavens"
-                                    "solo_leveling" -> "Solo Leveling"
-                                    "demon_slayer_s4" -> "Demon Slayer: Hashira Training"
-                                    else -> id
-                                }
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(vertical = 4.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.PlayArrow,
-                                        contentDescription = null,
-                                        tint = Color(0xFFE53935),
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(title, fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f))
-                                }
+                            Box(
+                                modifier = Modifier
+                                    .size(50.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF2C2C2C))
+                            ) {
+                                AsyncImage(
+                                    model = "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=100&q=80",
+                                    contentDescription = "Anime thumbnail",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Frieren: Beyond Journey's End",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    "Episode 24",
+                                    fontSize = 11.sp,
+                                    color = Color.White.copy(alpha = 0.7f)
+                                )
+                                Text(
+                                    "18:42 / 24:00",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
                             }
                         }
                     }
 
                     Spacer(modifier = Modifier.height(24.dp))
 
+                    // Edit Profil and Tutup buttons (matching image design)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         if (currentUser?.email == profile.email) {
-                            OutlinedButton(
+                            Button(
                                 onClick = { isEditing = true },
                                 modifier = Modifier.weight(1f),
-                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Text("Edit Profil", color = Color.White)
+                                Text("Edit Profil", color = Color.Black, fontWeight = FontWeight.Bold)
                             }
                         }
                         Button(
@@ -3887,6 +3848,136 @@ fun NotificationsDialog(viewModel: AnimeViewModel, onDismiss: () -> Unit) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) {
                     Text("Tutup")
+                }
+            }
+        }
+    }
+}
+
+// Ad Dialog Composable
+@Composable
+fun AdDialog(
+    onAdWatched: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var adProgress by remember { mutableStateOf(0f) }
+    var isAdPlaying by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        // Simulate ad playback
+        while (isAdPlaying && adProgress < 1f) {
+            kotlinx.coroutines.delay(100)
+            adProgress += 0.01f
+        }
+        if (adProgress >= 1f) {
+            isAdPlaying = false
+        }
+    }
+
+    Dialog(onDismissRequest = { /* Cannot dismiss, must watch */ }) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    "IKLAN PREMIUM",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Ad placeholder
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                        .background(Color(0xFF2C2C2C), RoundedCornerShape(12.dp))
+                        .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Filled.PlayArrow,
+                            contentDescription = "Ad",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "IKLAN SPONSOR",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            if (isAdPlaying) "Sedang diputar..." else "Selesai!",
+                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Progress bar
+                LinearProgressIndicator(
+                    progress = adProgress,
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = Color.White.copy(alpha = 0.1f)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    "${(adProgress * 100).toInt()}% selesai",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.7f)
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    "Tonton iklan sampai selesai untuk dapat 50 EXP!",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.7f),
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Button(
+                    onClick = {
+                        if (adProgress >= 1f) {
+                            onAdWatched()
+                            Toast.makeText(context, "+50 EXP diperoleh!", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Tunggu iklan selesai!", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    enabled = adProgress >= 1f,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (adProgress >= 1f) MaterialTheme.colorScheme.primary else Color.Gray
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        if (adProgress >= 1f) "Klaim Reward (+50 EXP)" else "Tunggu...",
+                        color = if (adProgress >= 1f) Color.Black else Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }

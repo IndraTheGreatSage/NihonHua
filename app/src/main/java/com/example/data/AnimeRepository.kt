@@ -117,10 +117,12 @@ class AnimeRepository private constructor(context: Context) {
         )
         historyDao.insertHistory(history)
 
-        // Increment watch minutes by mock amount
+        // Increment watch minutes and EXP
         val additionalMinutes = 1
+        val expGain = 10 // 10 EXP per minute of watching
         val updatedProfile = user.copy(
             watchDurationMinutes = user.watchDurationMinutes + additionalMinutes,
+            exp = user.exp + expGain,
             watchingList = if (user.watchingList.contains(animeId)) user.watchingList else {
                 if (user.watchingList.isEmpty()) animeId else "${user.watchingList},$animeId"
             }
@@ -154,8 +156,12 @@ class AnimeRepository private constructor(context: Context) {
         )
         commentDao.insertComment(comment)
 
-        // Update comment count on user profile
-        val updatedProfile = user.copy(commentCount = user.commentCount + 1)
+        // Update comment count and EXP on user profile
+        val expGain = 5 // 5 EXP per comment
+        val updatedProfile = user.copy(
+            commentCount = user.commentCount + 1,
+            exp = user.exp + expGain
+        )
         updateProfile(updatedProfile)
     }
 

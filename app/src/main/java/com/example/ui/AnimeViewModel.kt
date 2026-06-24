@@ -92,9 +92,17 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val scraped = AnichinScraper.getLatestShows()
-                _shows.value = scraped
+                // Try to fetch from backend API first
+                val apiData = ApiService.fetchAllAnime()
+                if (apiData.isNotEmpty()) {
+                    _shows.value = apiData
+                } else {
+                    // Fallback to local scraper if API returns empty
+                    val scraped = AnichinScraper.getLatestShows()
+                    _shows.value = scraped
+                }
             } catch (e: Exception) {
+                // Final fallback to local data
                 _shows.value = AnichinScraper.LOCAL_ANIMES
             } finally {
                 _isLoading.value = false
@@ -145,6 +153,44 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repo.saveWatchHistory(animeId, animeTitle, animeImage, episodeNumber, progressPercent, progressSeconds, totalSeconds)
         }
+    }
+
+    // Ad System
+    private val _shouldShowAd = MutableStateFlow(false)
+    val shouldShowAd: StateFlow<Boolean> = _shouldShowAd.asStateFlow()
+
+    private val _adReward = MutableStateFlow(0)
+    val adReward: StateFlow<Int> = _adReward.asStateFlow()
+
+    fun checkAdRequirement(): Boolean {
+        val user = currentUser.value ?: return false
+        if (user.isPremium) return false // Premium users don't see ads
+
+        val fortyMinutesMs = 40 * 60 * 1000L
+        val timeSinceLastAd = System.currentTimeMillis() - user.lastAdWatchTime
+        return timeSinceLastAd >= fortyMinutesMs
+    }
+
+    fun triggerAd() {
+        _shouldShowAd.value = true
+    }
+
+    fun onAdWatched() {
+        viewModelScope.launch {
+            val user = currentUser.value ?: return@launch
+            val expReward = 50 // 50 EXP for watching ad
+            val updatedProfile = user.copy(
+                exp = user.exp + expReward,
+                lastAdWatchTime = System.currentTimeMillis()
+            )
+            repo.updateProfile(updatedProfile)
+            _adReward.value = expReward
+            _shouldShowAd.value = false
+        }
+    }
+
+    fun dismissAd() {
+        _shouldShowAd.value = false
     }
 
     // Comments Actions

@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  scraper-api:
+    build: .
+    container_name: nihonhua-scraper
+    ports:
+      - "3536:3536"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
