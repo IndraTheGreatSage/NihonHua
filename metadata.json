@@ -1,0 +1,6 @@
+{
+  "name": "NihonHua",
+  "description": "Nonton Anime dan Donghua dengan scraping Anichin & Otakudesu, dilengkapi fitur komentar, offline download, login Google, subscription premium, and admin panel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
