@@ -15,6 +15,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "51243377068-pbmqqil71rpeqm3uso2cs789pmb75107.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aistudio.anidong.vtwxpl",
+            "certificate_hash": "944a38018293603b95431192065494dc847dcb0f"
+          }
+        },
+        {
           "client_id": "51243377068-p2oinuib97vem01qtboo5n1n8vmb4loj.apps.googleusercontent.com",
           "client_type": 3
         }
