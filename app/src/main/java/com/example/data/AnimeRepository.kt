@@ -2,7 +2,8 @@ package com.example.data
 
 import android.content.Context
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.GoogleAuthProvider
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,41 +19,25 @@ class AnimeRepository private constructor(context: Context) {
     private val codeDao = db.premiumGiftCodeDao()
     private val blockedDao = db.blockedUserDao()
 
+    private val firebaseAuth = FirebaseAuth.getInstance()
     private val repositoryScope = CoroutineScope(Dispatchers.IO)
-
-    // Firebase
-    private val auth = FirebaseAuth.getInstance()
-    private val firestore = FirebaseFirestore.getInstance()
 
     // Logged-in user state
     private val _currentUser = MutableStateFlow<UserProfile?>(null)
     val currentUser: StateFlow<UserProfile?> = _currentUser.asStateFlow()
 
-    // Level calculation based on EXP (up to level 1000)
-    private fun calculateLevel(exp: Int): Int {
-        if (exp < 100) return 1
-        // Formula-based calculation for levels 2-1000
-        // EXP required for level n: 100 * (n-1)^2
-        // This creates exponential progression
-        var level = 1
-        var cumulativeExp = 0
-        while (level < 1000) {
-            val expForNextLevel = 100 * level * level
-            if (exp < cumulativeExp + expForNextLevel) break
-            cumulativeExp += expForNextLevel
-            level++
-        }
-        return level
-    }
-
-    // Get EXP required for next level
-    private fun getExpForNextLevel(currentLevel: Int): Int {
-        if (currentLevel >= 1000) return Int.MAX_VALUE
-        return 100 * currentLevel * currentLevel
-    }
-
     init {
-        // Create standard admin user if not exists
+        // Restore session jika Firebase masih ada user login
+        firebaseAuth.currentUser?.let { firebaseUser ->
+            repositoryScope.launch {
+                val profile = profileDao.getProfileSync(firebaseUser.email ?: return@launch)
+                if (profile != null) {
+                    _currentUser.value = profile
+                }
+            }
+        }
+
+        // Buat admin default jika belum ada
         repositoryScope.launch {
             val admins = listOf(
                 Pair("rayx445@gmail.com", "Ray (Main Admin)"),
@@ -67,9 +52,7 @@ class AnimeRepository private constructor(context: Context) {
                             displayName = displayName,
                             photoUrl = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&q=80",
                             isPremium = true,
-                            premiumExpiration = Long.MAX_VALUE,
-                            level = 1000,
-                            exp = 100000000
+                            premiumExpiration = Long.MAX_VALUE
                         )
                     )
                 }
@@ -77,86 +60,59 @@ class AnimeRepository private constructor(context: Context) {
         }
     }
 
-    // Google Sign-In & Registration
-    suspend fun loginWithGoogle(email: String, displayName: String, photoUrl: String): Boolean {
-        // Check if blocked
-        val isBlocked = blockedDao.getBlockedUser(email) != null
-        if (isBlocked) {
-            return false
+    /**
+     * Login dengan Google ID Token dari Firebase Auth.
+     * Dipanggil setelah user berhasil sign in via GoogleSignIn di Activity/ViewModel.
+     */
+    suspend fun loginWithFirebaseGoogle(idToken: String): Boolean {
+        return try {
+            val credential = GoogleAuthProvider.getCredential(idToken, null)
+            val authResult = firebaseAuth.signInWithCredential(credential).await()
+            val firebaseUser = authResult.user ?: return false
+
+            val email = firebaseUser.email ?: return false
+            val displayName = firebaseUser.displayName ?: email.substringBefore("@")
+            val photoUrl = firebaseUser.photoUrl?.toString()
+                ?: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&q=80"
+
+            loginWithGoogle(email, displayName, photoUrl)
+        } catch (e: Exception) {
+            false
         }
+    }
+
+    /**
+     * Simpan / sinkron profil user ke Room setelah Firebase Auth sukses.
+     * Bisa juga dipanggil langsung jika sudah punya data dari Firebase user object.
+     */
+    suspend fun loginWithGoogle(email: String, displayName: String, photoUrl: String): Boolean {
+        // Cek apakah user diblokir
+        val isBlocked = blockedDao.getBlockedUser(email) != null
+        if (isBlocked) return false
 
         var profile = profileDao.getProfileSync(email)
         if (profile == null) {
             profile = UserProfile(
                 email = email,
                 displayName = displayName,
-                photoUrl = photoUrl.ifEmpty { "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&q=80" },
+                photoUrl = photoUrl.ifEmpty {
+                    "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&q=80"
+                },
                 isPremium = email == "rayx445@gmail.com" || email == "niparsia433@gmail.com",
-                premiumExpiration = if (email == "rayx445@gmail.com") Long.MAX_VALUE else 0L,
-                level = 1,
-                exp = 0
+                premiumExpiration = if (email == "rayx445@gmail.com") Long.MAX_VALUE else 0L
             )
             profileDao.insertProfile(profile)
-            // Sync to Firestore
-            syncProfileToFirestore(profile)
-        } else {
-            // Sync from Firestore if exists
-            syncProfileFromFirestore(email)
         }
         _currentUser.value = profile
         return true
     }
 
-    // Firestore sync functions
-    private suspend fun syncProfileToFirestore(profile: UserProfile) {
-        try {
-            val userProfileMap = mapOf(
-                "email" to profile.email,
-                "displayName" to profile.displayName,
-                "photoUrl" to profile.photoUrl,
-                "joinDate" to profile.joinDate,
-                "watchDurationMinutes" to profile.watchDurationMinutes,
-                "commentCount" to profile.commentCount,
-                "isPremium" to profile.isPremium,
-                "premiumExpiration" to profile.premiumExpiration,
-                "watchingList" to profile.watchingList,
-                "exp" to profile.exp,
-                "lastAdWatchTime" to profile.lastAdWatchTime,
-                "level" to profile.level
-            )
-            firestore.collection("users").document(profile.email)
-                .set(userProfileMap)
-                .await()
-        } catch (e: Exception) {
-            // Silent fail for sync errors
-        }
-    }
-
-    private suspend fun syncProfileFromFirestore(email: String) {
-        try {
-            val doc = firestore.collection("users").document(email).get().await()
-            if (doc.exists()) {
-                val firestoreProfile = doc.data
-                val localProfile = profileDao.getProfileSync(email)
-                if (localProfile != null && firestoreProfile != null) {
-                    // Merge data - prefer Firestore for premium status
-                    val mergedProfile = localProfile.copy(
-                        isPremium = firestoreProfile["isPremium"] as? Boolean ?: localProfile.isPremium,
-                        premiumExpiration = (firestoreProfile["premiumExpiration"] as? Long) ?: localProfile.premiumExpiration,
-                        exp = (firestoreProfile["exp"] as? Long)?.toInt() ?: localProfile.exp,
-                        level = (firestoreProfile["level"] as? Long)?.toInt() ?: localProfile.level
-                    )
-                    profileDao.updateProfile(mergedProfile)
-                }
-            }
-        } catch (e: Exception) {
-            // Silent fail for sync errors
-        }
-    }
-
     fun logout() {
+        firebaseAuth.signOut()
         _currentUser.value = null
     }
+
+    fun getCurrentFirebaseUser(): FirebaseUser? = firebaseAuth.currentUser
 
     // Profiles
     fun getUserProfile(email: String): Flow<UserProfile?> {
@@ -168,16 +124,10 @@ class AnimeRepository private constructor(context: Context) {
     }
 
     suspend fun updateProfile(profile: UserProfile) {
-        // Recalculate level based on EXP
-        val newLevel = calculateLevel(profile.exp)
-        val updatedProfile = profile.copy(level = newLevel)
-        
-        profileDao.updateProfile(updatedProfile)
+        profileDao.updateProfile(profile)
         if (_currentUser.value?.email == profile.email) {
-            _currentUser.value = updatedProfile
+            _currentUser.value = profile
         }
-        // Sync to Firestore
-        syncProfileToFirestore(updatedProfile)
     }
 
     // Watch History & Progress Sync
@@ -209,12 +159,9 @@ class AnimeRepository private constructor(context: Context) {
         )
         historyDao.insertHistory(history)
 
-        // Increment watch minutes and EXP
         val additionalMinutes = 1
-        val expGain = 10 // 10 EXP per minute of watching
         val updatedProfile = user.copy(
             watchDurationMinutes = user.watchDurationMinutes + additionalMinutes,
-            exp = user.exp + expGain,
             watchingList = if (user.watchingList.contains(animeId)) user.watchingList else {
                 if (user.watchingList.isEmpty()) animeId else "${user.watchingList},$animeId"
             }
@@ -222,7 +169,7 @@ class AnimeRepository private constructor(context: Context) {
         updateProfile(updatedProfile)
     }
 
-    // Comments & Community rules
+    // Comments
     fun getEpisodeComments(animeId: String, episodeNumber: String): Flow<List<Comment>> {
         return commentDao.getComments(animeId, episodeNumber)
     }
@@ -233,7 +180,7 @@ class AnimeRepository private constructor(context: Context) {
 
     suspend fun addComment(animeId: String, animeTitle: String, episodeNumber: String, content: String) {
         val user = _currentUser.value ?: return
-        
+
         val isBlocked = blockedDao.getBlockedUser(user.email) != null
         if (isBlocked) return
 
@@ -248,19 +195,12 @@ class AnimeRepository private constructor(context: Context) {
         )
         commentDao.insertComment(comment)
 
-        // Update comment count and EXP on user profile
-        val expGain = 5 // 5 EXP per comment
-        val updatedProfile = user.copy(
-            commentCount = user.commentCount + 1,
-            exp = user.exp + expGain
-        )
+        val updatedProfile = user.copy(commentCount = user.commentCount + 1)
         updateProfile(updatedProfile)
     }
 
     suspend fun editComment(commentId: Int, newContent: String) {
         val user = _currentUser.value ?: return
-        // Get comments list and search (normally select by id but update is easy)
-        // Since we update content, we can re-insert or edit. To be robust, let's create custom update
         commentDao.getAllComments().firstOrNull()?.find { it.id == commentId }?.let { oldComment ->
             if (oldComment.userEmail == user.email || user.email == "rayx445@gmail.com") {
                 commentDao.insertComment(oldComment.copy(content = newContent, timestamp = System.currentTimeMillis()))
@@ -280,7 +220,6 @@ class AnimeRepository private constructor(context: Context) {
 
     suspend fun blockUser(email: String, reason: String) {
         blockedDao.insertBlockedUser(BlockedUser(email, reason))
-        // Auto remove user's profile from local active session if they are active
         if (_currentUser.value?.email == email) {
             _currentUser.value = null
         }
@@ -297,7 +236,7 @@ class AnimeRepository private constructor(context: Context) {
         return blockedDao.getBlockedUsersFlow()
     }
 
-    // Like & Dislike system
+    // Like & Dislike
     suspend fun likeComment(commentId: Int) {
         val user = _currentUser.value ?: return
         commentDao.getAllComments().firstOrNull()?.find { it.id == commentId }?.let { comment ->
@@ -366,7 +305,6 @@ class AnimeRepository private constructor(context: Context) {
         )
         downloadDao.insertDownload(download)
 
-        // Simulate complete download in background thread
         repositoryScope.launch {
             kotlinx.coroutines.delay(2000)
             downloadDao.insertDownload(download.copy(downloadProgress = 0.5f))
@@ -408,7 +346,6 @@ class AnimeRepository private constructor(context: Context) {
             return "Anda sudah menukarkan kode ini!"
         }
 
-        // Apply premium days
         val addedTimeMs = when (codeObj.premiumType) {
             "1_DAY" -> 24L * 60 * 60 * 1000
             "5_DAYS" -> 5L * 24 * 60 * 60 * 1000
@@ -426,13 +363,9 @@ class AnimeRepository private constructor(context: Context) {
         }
 
         val newExp = currentExp + addedTimeMs
-        val updatedProfile = user.copy(
-            isPremium = true,
-            premiumExpiration = newExp
-        )
+        val updatedProfile = user.copy(isPremium = true, premiumExpiration = newExp)
         updateProfile(updatedProfile)
 
-        // Update the claim count on the code
         val newClaimedBy = if (codeObj.claimedBy.isEmpty()) user.email else "${codeObj.claimedBy},${user.email}"
         codeDao.updateCode(
             codeObj.copy(
@@ -448,7 +381,9 @@ class AnimeRepository private constructor(context: Context) {
             "1_YEAR" -> "1 Tahun"
             else -> codeObj.premiumType
         }
-        return "Berhasil klaim Premium $readableType! Berlaku hingga ${java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(newExp))}"
+        return "Berhasil klaim Premium $readableType! Berlaku hingga ${
+            java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(newExp))
+        }"
     }
 
     suspend fun purchasePremium(tier: String): String {
@@ -461,8 +396,6 @@ class AnimeRepository private constructor(context: Context) {
             else -> 0L
         }
 
-        if (addedTimeMs == 0L) return "Tipe premium tidak valid!"
-
         val currentExp = if (user.isPremium && user.premiumExpiration > System.currentTimeMillis()) {
             user.premiumExpiration
         } else {
@@ -470,20 +403,11 @@ class AnimeRepository private constructor(context: Context) {
         }
 
         val newExp = currentExp + addedTimeMs
-        val updatedProfile = user.copy(
-            isPremium = true,
-            premiumExpiration = newExp
-        )
+        val updatedProfile = user.copy(isPremium = true, premiumExpiration = newExp)
         updateProfile(updatedProfile)
-        return "Berhasil membeli paket premium! Berlaku hingga ${java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(newExp))}"
-    }
-
-    // Admin function to update user level and EXP
-    suspend fun adminUpdateUserLevelAndExp(email: String, level: Int, exp: Int) {
-        val user = profileDao.getProfileSync(email) ?: return
-        val updatedProfile = user.copy(level = level, exp = exp)
-        profileDao.updateProfile(updatedProfile)
-        syncProfileToFirestore(updatedProfile)
+        return "Berhasil membeli paket premium! Berlaku hingga ${
+            java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(newExp))
+        }"
     }
 
     companion object {

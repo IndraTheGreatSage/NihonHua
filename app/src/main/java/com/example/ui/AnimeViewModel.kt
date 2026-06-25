@@ -1,41 +1,32 @@
 package com.example.ui
 
 import android.app.Application
-import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.*
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalCoroutinesApi::class)
 class AnimeViewModel(application: Application) : AndroidViewModel(application) {
     private val repo = AnimeRepository.getInstance(application)
 
-    // Current logged-in user
     val currentUser: StateFlow<UserProfile?> = repo.currentUser
 
-    // All available shows (ongoing + local + scraped)
     private val _shows = MutableStateFlow<List<AnimeVideo>>(emptyList())
     val shows: StateFlow<List<AnimeVideo>> = _shows.asStateFlow()
 
-    // Loading status
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    // Selected Anime Detail
     private val _selectedAnime = MutableStateFlow<AnimeVideo?>(null)
     val selectedAnime: StateFlow<AnimeVideo?> = _selectedAnime.asStateFlow()
 
-    // Selected Episode and quality
     private val _selectedEpisode = MutableStateFlow<Episode?>(null)
     val selectedEpisode: StateFlow<Episode?> = _selectedEpisode.asStateFlow()
 
     private val _selectedQuality = MutableStateFlow("1080p")
     val selectedQuality: StateFlow<String> = _selectedQuality.asStateFlow()
 
-    // Comments for selected episode
     val currentComments: StateFlow<List<Comment>> = _selectedAnime
         .combine(_selectedEpisode) { anime, episode ->
             Pair(anime?.id, episode?.episodeNumber)
@@ -49,30 +40,21 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Watch History
     val watchHistory: StateFlow<List<WatchHistory>> = currentUser
         .flatMapLatest { user ->
-            if (user != null) {
-                repo.getWatchHistory(user.email)
-            } else {
-                flowOf(emptyList())
-            }
+            if (user != null) repo.getWatchHistory(user.email) else flowOf(emptyList())
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Downloads
     val downloads: StateFlow<List<OfflineDownload>> = repo.getDownloads()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Dark Mode Theme State
-    private val _isDarkMode = MutableStateFlow(true) // Estetis Dark Mode default
+    private val _isDarkMode = MutableStateFlow(true)
     val isDarkMode: StateFlow<Boolean> = _isDarkMode.asStateFlow()
 
-    // Notification Simulation List
     private val _notifications = MutableStateFlow<List<AppNotification>>(emptyList())
     val notifications: StateFlow<List<AppNotification>> = _notifications.asStateFlow()
 
-    // Admin Panel States (Only loaded/subscribed if admin is active)
     val allComments: StateFlow<List<Comment>> = repo.getAllComments()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -82,9 +64,12 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
     val blockedUsers: StateFlow<List<BlockedUser>> = repo.getBlockedUsers()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Active Profile inspect popup
     private val _inspectedProfile = MutableStateFlow<UserProfile?>(null)
     val inspectedProfile: StateFlow<UserProfile?> = _inspectedProfile.asStateFlow()
+
+    // State Google Sign-In (ID Token dari Activity dikirim ke sini)
+    private val _googleSignInError = MutableStateFlow<String?>(null)
+    val googleSignInError: StateFlow<String?> = _googleSignInError.asStateFlow()
 
     init {
         loadLatestShows()
@@ -95,18 +80,9 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                // Try to fetch from backend API first
-                val apiData = ApiService.fetchAllAnime()
-                if (apiData.isNotEmpty()) {
-                    _shows.value = apiData
-                } else {
-                    // Fallback to local scraper if API returns empty
-                    val scraped = AnichinScraper.getLatestShows()
-                    _shows.value = scraped
-                }
+                val scraped = AnichinScraper.getLatestShows()
+                _shows.value = scraped
             } catch (e: Exception) {
-                e.printStackTrace()
-                // Final fallback to local data
                 _shows.value = AnichinScraper.LOCAL_ANIMES
             } finally {
                 _isLoading.value = false
@@ -136,21 +112,27 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
         _isDarkMode.value = !_isDarkMode.value
     }
 
-    // Real Google Auth with Firebase
-    fun signInWithGoogle(context: android.content.Context) {
+    /**
+     * Dipanggil dari Activity setelah Google Sign-In berhasil mendapat idToken.
+     * Gunakan GoogleSignIn.getSignedInAccountFromIntent() di Activity,
+     * lalu kirim account.idToken ke sini.
+     */
+    fun handleFirebaseGoogleLogin(idToken: String, onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch {
-            try {
-                // TODO: Implement actual Firebase Auth
-                // For now, fallback to manual login dialog
-                // This will be replaced with real Firebase Auth implementation
-                Toast.makeText(context, "Firebase Auth belum dikonfigurasi. Gunakan manual login.", Toast.LENGTH_LONG).show()
-            } catch (e: Exception) {
-                Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+            val success = repo.loginWithFirebaseGoogle(idToken)
+            if (success) {
+                val user = repo.currentUser.value
+                onResult(true, "Selamat datang, ${user?.displayName ?: ""}!")
+            } else {
+                onResult(false, "Akun Anda telah diblokir atau terjadi kesalahan autentikasi.")
             }
         }
     }
 
-    // Google Login Non-simulated (direct register and session sync)
+    /**
+     * Fallback: login manual via email (untuk development / akun custom).
+     * Di production, sebaiknya dihapus dan hanya pakai Firebase.
+     */
     fun handleGoogleLogin(email: String, displayName: String, photoUrl: String, onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch {
             val success = repo.loginWithGoogle(email, displayName, photoUrl)
@@ -166,89 +148,40 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
         repo.logout()
     }
 
-    // Save history progress
-    fun saveProgress(animeId: String, animeTitle: String, animeImage: String, episodeNumber: String, progressPercent: Float, progressSeconds: Long, totalSeconds: Long) {
+    fun saveProgress(
+        animeId: String, animeTitle: String, animeImage: String,
+        episodeNumber: String, progressPercent: Float,
+        progressSeconds: Long, totalSeconds: Long
+    ) {
         viewModelScope.launch {
             repo.saveWatchHistory(animeId, animeTitle, animeImage, episodeNumber, progressPercent, progressSeconds, totalSeconds)
         }
     }
 
-    // Ad System
-    private val _shouldShowAd = MutableStateFlow(false)
-    val shouldShowAd: StateFlow<Boolean> = _shouldShowAd.asStateFlow()
-
-    private val _adReward = MutableStateFlow(0)
-    val adReward: StateFlow<Int> = _adReward.asStateFlow()
-
-    fun checkAdRequirement(): Boolean {
-        val user = currentUser.value ?: return false
-        if (user.isPremium) return false // Premium users don't see ads
-
-        val fortyMinutesMs = 40 * 60 * 1000L
-        val timeSinceLastAd = System.currentTimeMillis() - user.lastAdWatchTime
-        return timeSinceLastAd >= fortyMinutesMs
-    }
-
-    fun triggerAd() {
-        _shouldShowAd.value = true
-    }
-
-    fun onAdWatched() {
-        viewModelScope.launch {
-            val user = currentUser.value ?: return@launch
-            val expReward = 50 // 50 EXP for watching ad
-            val updatedProfile = user.copy(
-                exp = user.exp + expReward,
-                lastAdWatchTime = System.currentTimeMillis()
-            )
-            repo.updateProfile(updatedProfile)
-            _adReward.value = expReward
-            _shouldShowAd.value = false
-        }
-    }
-
-    fun dismissAd() {
-        _shouldShowAd.value = false
-    }
-
-    // Comments Actions
     fun postComment(animeId: String, animeTitle: String, episodeNumber: String, content: String) {
-        viewModelScope.launch {
-            repo.addComment(animeId, animeTitle, episodeNumber, content)
-        }
+        viewModelScope.launch { repo.addComment(animeId, animeTitle, episodeNumber, content) }
     }
 
     fun updateComment(commentId: Int, content: String) {
-        viewModelScope.launch {
-            repo.editComment(commentId, content)
-        }
+        viewModelScope.launch { repo.editComment(commentId, content) }
     }
 
     fun deleteComment(commentId: Int) {
-        viewModelScope.launch {
-            repo.deleteComment(commentId)
-        }
+        viewModelScope.launch { repo.deleteComment(commentId) }
     }
 
     fun reportComment(commentId: Int, reason: String) {
-        viewModelScope.launch {
-            repo.reportComment(commentId, reason)
-        }
+        viewModelScope.launch { repo.reportComment(commentId, reason) }
     }
 
     fun likeComment(commentId: Int) {
-        viewModelScope.launch {
-            repo.likeComment(commentId)
-        }
+        viewModelScope.launch { repo.likeComment(commentId) }
     }
 
     fun dislikeComment(commentId: Int) {
-        viewModelScope.launch {
-            repo.dislikeComment(commentId)
-        }
+        viewModelScope.launch { repo.dislikeComment(commentId) }
     }
 
-    // Downloads
     fun downloadEpisode(anime: AnimeVideo, episode: Episode) {
         viewModelScope.launch {
             repo.startDownload(anime.id, anime.title, anime.imageUrl, episode.episodeNumber, episode.videoUrl)
@@ -256,12 +189,9 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteDownloadedEpisode(downloadId: String) {
-        viewModelScope.launch {
-            repo.deleteDownload(downloadId)
-        }
+        viewModelScope.launch { repo.deleteDownload(downloadId) }
     }
 
-    // Profile Inspection popup
     fun inspectUserProfile(email: String) {
         viewModelScope.launch {
             _inspectedProfile.value = repo.getProfileSync(email)
@@ -272,7 +202,6 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
         _inspectedProfile.value = null
     }
 
-    // Premium Subscription Purchasing
     fun purchasePremium(tier: String, onResult: (String) -> Unit) {
         viewModelScope.launch {
             val msg = repo.purchasePremium(tier)
@@ -280,7 +209,6 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Update general user profile
     fun updateUserProfile(displayName: String, photoUrl: String, onResult: (Boolean, String) -> Unit) {
         val user = currentUser.value ?: return
         viewModelScope.launch {
@@ -290,7 +218,6 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Gift Codes Code Claiming
     fun redeemGiftCode(code: String, onResult: (String) -> Unit) {
         viewModelScope.launch {
             val msg = repo.claimPremiumCode(code)
@@ -298,10 +225,8 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Admin panel specific calls
-    private fun isUserAdmin(email: String): Boolean {
-        return email == "rayx445@gmail.com" || email == "niparsia433@gmail.com"
-    }
+    private fun isUserAdmin(email: String) =
+        email == "rayx445@gmail.com" || email == "niparsia433@gmail.com"
 
     fun adminUpdateProfile(displayName: String, photoUrl: String) {
         val admin = currentUser.value ?: return
@@ -314,9 +239,7 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
     fun adminDeleteComment(commentId: Int) {
         val admin = currentUser.value ?: return
         if (!isUserAdmin(admin.email)) return
-        viewModelScope.launch {
-            repo.deleteComment(commentId)
-        }
+        viewModelScope.launch { repo.deleteComment(commentId) }
     }
 
     fun adminGeneratePremiumCode(code: String, premiumType: String, maxClaims: Int, onResult: (String) -> Unit) {
@@ -334,36 +257,41 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
     fun adminBlockUser(email: String, reason: String) {
         val admin = currentUser.value ?: return
         if (!isUserAdmin(admin.email)) return
-        viewModelScope.launch {
-            repo.blockUser(email, reason)
-        }
+        viewModelScope.launch { repo.blockUser(email, reason) }
     }
 
     fun adminUnblockUser(email: String) {
         val admin = currentUser.value ?: return
         if (!isUserAdmin(admin.email)) return
-        viewModelScope.launch {
-            repo.removeBlockedUser(email)
-        }
+        viewModelScope.launch { repo.removeBlockedUser(email) }
     }
 
-    fun adminUpdateUserLevelAndExp(email: String, level: Int, exp: Int) {
-        val admin = currentUser.value ?: return
-        if (!isUserAdmin(admin.email)) return
-        viewModelScope.launch {
-            repo.adminUpdateUserLevelAndExp(email, level, exp)
-        }
+    private val _isAppModded = MutableStateFlow(false)
+    val isAppModded: StateFlow<Boolean> = _isAppModded.asStateFlow()
+
+    private val _isAppOutdated = MutableStateFlow(false)
+    val isAppOutdated: StateFlow<Boolean> = _isAppOutdated.asStateFlow()
+
+    fun setAppModded(modded: Boolean) { _isAppModded.value = modded }
+    fun setAppOutdated(outdated: Boolean) { _isAppOutdated.value = outdated }
+
+    fun shareReviewToSocialMedia(animeTitle: String, rating: String, reviewText: String, onShareCompleted: (String) -> Unit) {
+        val shareMsg = "Menonton $animeTitle dengan Rating $rating/10 di NihonHua! Ulasan: \"$reviewText\" #NihonHua #Anime #Donghua"
+        onShareCompleted(shareMsg)
     }
 
     private fun generateInitialNotifications() {
         _notifications.value = listOf(
-            AppNotification(1, "Selamat Datang!", "Nikmati streaming anime dan donghua kualitas 4K.", System.currentTimeMillis()),
-            AppNotification(2, "Update Premium", "Paket 30 hari sekarang diskon 20%!", System.currentTimeMillis() - 86400000)
+            AppNotification(1, "Rilis Episode Baru", "Battle Through The Heavens S5 Episode 101 telah rilis! Nonton sekarang dengan grafis 4K.", System.currentTimeMillis() - 3600000),
+            AppNotification(2, "Rilis Episode Baru", "Renegade Immortal Episode 38 sudah tayang. Ikuti perjalanan kejam Wang Lin!", System.currentTimeMillis() - 7200000),
+            AppNotification(3, "Komunitas Aktif", "Seseorang menyukai komentar Anda di Perfect World Episode 165.", System.currentTimeMillis() - 14400000)
         )
     }
-
-    fun shareReviewToSocialMedia(animeTitle: String, rating: String, review: String, onResult: (String) -> Unit) {
-        // Mock social sharing
-        onResult("Berhasil dibagikan!")
-    }
 }
+
+data class AppNotification(
+    val id: Int,
+    val title: String,
+    val message: String,
+    val timestamp: Long
+)
