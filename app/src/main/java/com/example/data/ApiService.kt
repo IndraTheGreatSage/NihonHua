@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
 
 object ApiService {
     private const val TAG = "ApiService"
-    private const val BASE_URL = "http://server.fromscratch.web.id:3536" // Pterodactyl server URL
+    private const val BASE_URL = ApiConfig.baseUrl // from ApiConfig.kt
     
     private val client: OkHttpClient by lazy {
         val loggingInterceptor = HttpLoggingInterceptor().apply {
