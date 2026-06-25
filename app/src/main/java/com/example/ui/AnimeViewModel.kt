@@ -107,10 +107,24 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val scraped = AnichinScraper.getLatestShows()
-                _shows.value = scraped
+                // Try to fetch from backend API first
+                val apiShows = ApiService.fetchAllAnime()
+                if (apiShows.isNotEmpty()) {
+                    _shows.value = apiShows
+                } else {
+                    // Fallback to local scraper if API returns empty
+                    val scraped = AnichinScraper.getLatestShows()
+                    _shows.value = scraped
+                }
             } catch (e: Exception) {
-                _shows.value = AnichinScraper.LOCAL_ANIMES
+                // Fallback to local scraper on error
+                try {
+                    val scraped = AnichinScraper.getLatestShows()
+                    _shows.value = scraped
+                } catch (e2: Exception) {
+                    // Final fallback to local data
+                    _shows.value = AnichinScraper.LOCAL_ANIMES
+                }
             } finally {
                 _isLoading.value = false
             }
@@ -150,6 +164,8 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
             if (success) {
                 val user = repo.currentUser.value
                 onResult(true, "Selamat datang, ${user?.displayName ?: ""}!")
+                // Load anime data after successful login
+                loadLatestShows()
             } else {
                 onResult(false, "Akun Anda telah diblokir atau terjadi kesalahan autentikasi.")
             }
@@ -196,6 +212,8 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
             val success = repo.loginWithGoogle(email, displayName, photoUrl)
             if (success) {
                 onResult(true, "Selamat datang, $displayName!")
+                // Load anime data after successful login
+                loadLatestShows()
             } else {
                 onResult(false, "Akun Anda telah diblokir karena melanggar aturan komunitas!")
             }

@@ -77,27 +77,6 @@ class AnimeRepository private constructor(context: Context) {
     }
 
     /**
-     * Login dengan Google ID Token dari Firebase Auth.
-     * Dipanggil setelah user berhasil sign in via GoogleSignIn di Activity/ViewModel.
-     */
-    suspend fun loginWithFirebaseGoogle(idToken: String): Boolean {
-        return try {
-            val credential = GoogleAuthProvider.getCredential(idToken, null)
-            val authResult = firebaseAuth.signInWithCredential(credential).await()
-            val firebaseUser = authResult.user ?: return false
-
-            val email = firebaseUser.email ?: return false
-            val displayName = firebaseUser.displayName ?: email.substringBefore("@")
-            val photoUrl = firebaseUser.photoUrl?.toString()
-                ?: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&q=80"
-
-            loginWithGoogle(email, displayName, photoUrl)
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    /**
      * Simpan / sinkron profil user ke Room setelah Firebase Auth sukses.
      * Bisa juga dipanggil langsung jika sudah punya data dari Firebase user object.
      */
@@ -133,41 +112,14 @@ class AnimeRepository private constructor(context: Context) {
         return try {
             val credential = GoogleAuthProvider.getCredential(idToken, null)
             val authResult = firebaseAuth.signInWithCredential(credential).await()
-            val firebaseUser = authResult.user
-            
-            if (firebaseUser != null) {
-                val email = firebaseUser.email ?: return false
-                val displayName = firebaseUser.displayName ?: "User"
-                val photoUrl = firebaseUser.photoUrl?.toString() ?: ""
-                
-                // Check if blocked
-                val isBlocked = blockedDao.getBlockedUser(email) != null
-                if (isBlocked) {
-                    firebaseAuth.signOut()
-                    return false
-                }
-                
-                var profile = profileDao.getProfileSync(email)
-                if (profile == null) {
-                    profile = UserProfile(
-                        email = email,
-                        displayName = displayName,
-                        photoUrl = photoUrl.ifEmpty { "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&q=80" },
-                        isPremium = email == "rayx445@gmail.com" || email == "niparsia433@gmail.com",
-                        premiumExpiration = if (email == "rayx445@gmail.com") Long.MAX_VALUE else 0L,
-                        level = 1,
-                        exp = 0
-                    )
-                    profileDao.insertProfile(profile)
-                    syncProfileToFirestore(profile)
-                } else {
-                    syncProfileFromFirestore(email)
-                }
-                _currentUser.value = profile
-                true
-            } else {
-                false
-            }
+            val firebaseUser = authResult.user ?: return false
+
+            val email = firebaseUser.email ?: return false
+            val displayName = firebaseUser.displayName ?: email.substringBefore("@")
+            val photoUrl = firebaseUser.photoUrl?.toString()
+                ?: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&q=80"
+
+            loginWithGoogle(email, displayName, photoUrl)
         } catch (e: Exception) {
             false
         }
