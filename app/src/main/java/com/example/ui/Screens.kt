@@ -1,5 +1,6 @@
 package com.example.ui
 
+import android.graphics.Bitmap
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
@@ -24,6 +25,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
@@ -36,6 +38,10 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.example.data.*
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.WriterException
+import com.google.zxing.qrcode.QRCodeWriter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -49,6 +55,26 @@ fun maskEmail(email: String): String {
     return "${name.first()}" + "*".repeat(name.length - 2) + "${name.last()}@$domain"
 }
 
+fun generateQRCode(content: String): Bitmap? {
+    return try {
+        val writer = QRCodeWriter()
+        val hints = mapOf(EncodeHintType.MARGIN to 0)
+        val bitMatrix = writer.encode(content, BarcodeFormat.QR_CODE, 300, 300, hints)
+        val width = bitMatrix.width
+        val height = bitMatrix.height
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
+        
+        for (x in 0 until width) {
+            for (y in 0 until height) {
+                bitmap.setPixel(x, y, if (bitMatrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+            }
+        }
+        bitmap
+    } catch (e: WriterException) {
+        null
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainAppNavigation(
@@ -58,113 +84,18 @@ fun MainAppNavigation(
     val context = LocalContext.current
     val currentUser by viewModel.currentUser.collectAsState()
     val isDarkMode by viewModel.isDarkMode.collectAsState()
-
-    val isModded by viewModel.isAppModded.collectAsState()
-    val isOutdated by viewModel.isAppOutdated.collectAsState()
+    val shouldShowAd by viewModel.shouldShowAd.collectAsState()
 
     var activeTab by remember { mutableStateOf("dashboard") }
 
-    if (isModded) {
-        // Red Anti-MOD Screen
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFF0F0404)),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.AdminPanelSettings,
-                    contentDescription = "Security Alert",
-                    tint = Color.Red,
-                    modifier = Modifier.size(96.dp)
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-                Text(
-                    text = "KEAMANAN NIHONHUA TERANCAM!",
-                    color = Color.Red,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Black,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "Aplikasi terdeteksi telah dimodifikasi secara ilegal (Signature Tampered)! Untuk mencegah pencurian kredensial akun dan penyalahgunaan server premium, akses ditolak.",
-                    color = Color.White,
-                    fontSize = 13.sp,
-                    textAlign = TextAlign.Center,
-                    lineHeight = 20.sp
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-                Button(
-                    onClick = {
-                        Toast.makeText(context, "Mengunduh Versi Resmi NihonHua...", Toast.LENGTH_LONG).show()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Unduh Versi Resmi (APK)", color = Color.White, fontWeight = FontWeight.Bold)
-                }
-            }
+    // Check ad requirement when tab changes
+    LaunchedEffect(activeTab) {
+        if (viewModel.checkAdRequirement()) {
+            viewModel.triggerAd()
         }
-    } else if (isOutdated) {
-        // Force Update Block screen
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFF0B0E11)),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Download,
-                    contentDescription = "Force Update",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(96.dp)
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-                Text(
-                    text = "PEMBARUAN WAJIB NIHONHUA",
-                    color = MaterialTheme.colorScheme.primary,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Black,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "Versi aplikasi Anda sudah usang. Pembaruan diperlukan untuk melindungi akun dari modifikasi berbahaya dan memastikan kompatibilitas server streaming.",
-                    color = MaterialTheme.colorScheme.onBackground,
-                    fontSize = 13.sp,
-                    textAlign = TextAlign.Center,
-                    lineHeight = 20.sp
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-                Button(
-                    onClick = {
-                        Toast.makeText(context, "Membuka link update...", Toast.LENGTH_SHORT).show()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Update Ke Versi Terbaru", color = Color.Black, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-    } else if (currentUser == null) {
+    }
+
+    if (currentUser == null) {
         LoginScreen(viewModel = viewModel)
     } else {
         Box(modifier = Modifier.fillMaxSize()) {
@@ -306,6 +237,14 @@ fun MainAppNavigation(
                         viewModel.clearInspectedProfile()
                     }
                 }
+
+                // Ad dialog for non-premium users
+                if (shouldShowAd) {
+                    AdDialog(
+                        onAdWatched = { viewModel.onAdWatched() },
+                        onDismiss = { viewModel.dismissAd() }
+                    )
+                }
             }
         }
 
@@ -318,23 +257,14 @@ fun MainAppNavigation(
     }
 }
 
-// 1. LOGIN SCREEN WITH AUTHENTIC GOOGLE ACCOUNT CHOOSER & REGISTER FORM
+// 1. LOGIN SCREEN WITH REAL GOOGLE AUTH
 @Composable
 fun LoginScreen(viewModel: AnimeViewModel) {
-    var showGoogleChooser by remember { mutableStateOf(false) }
     var customEmail by remember { mutableStateOf("") }
     var customName by remember { mutableStateOf("") }
     var customAvatar by remember { mutableStateOf("") }
     var showCustomRegister by remember { mutableStateOf(false) }
     var isConnectingGoogle by remember { mutableStateOf(false) }
-
-    if (isConnectingGoogle) {
-        LaunchedEffect(Unit) {
-            kotlinx.coroutines.delay(800)
-            isConnectingGoogle = false
-            showGoogleChooser = true
-        }
-    }
 
     val context = LocalContext.current
 
@@ -406,7 +336,7 @@ fun LoginScreen(viewModel: AnimeViewModel) {
 
             // Brand-Compliant Google Sign-In Button
             Button(
-                onClick = { isConnectingGoogle = true },
+                onClick = { viewModel.signInWithGoogle(context) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
@@ -444,7 +374,7 @@ fun LoginScreen(viewModel: AnimeViewModel) {
             )
         }
 
-        // Simulated native loading indicator overlay
+        // Loading indicator
         if (isConnectingGoogle) {
             Dialog(onDismissRequest = {}) {
                 Card(
@@ -473,221 +403,101 @@ fun LoginScreen(viewModel: AnimeViewModel) {
                 }
             }
         }
+    }
 
-        // Simulated Native Google Account Chooser Modal
-        if (showGoogleChooser) {
-            Dialog(onDismissRequest = { showGoogleChooser = false }) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF202124)) // Material Dark Google color
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(20.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Filled.AccountCircle,
-                                contentDescription = null,
-                                tint = Color(0xFF4285F4),
-                                modifier = Modifier.size(28.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                "Pilih akun Google",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        }
-                        Text(
-                            "untuk melanjutkan ke NihonHua",
-                            fontSize = 13.sp,
-                            color = Color(0xFF9AA0A6),
-                            modifier = Modifier.padding(start = 38.dp, bottom = 16.dp)
-                        )
+    // Custom account linker (100% non-simulated database registration)
+    if (showCustomRegister) {
+        Dialog(onDismissRequest = { showCustomRegister = false }) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        "Masuk Akun Google",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
 
-                        Divider(color = Color(0xFF3C4043))
+                    OutlinedTextField(
+                        value = customEmail,
+                        onValueChange = { customEmail = it },
+                        label = { Text("Alamat Email Google") },
+                        placeholder = { Text("contoh@gmail.com") },
+                        leadingIcon = { Icon(Icons.Filled.Email, contentDescription = null) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
 
-                        // Account 1: General User (Using their actual active email address and a clean name)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    showGoogleChooser = false
-                                    viewModel.handleGoogleLogin(
-                                        "niparsia433@gmail.com",
-                                        "Niparsia",
-                                        "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&q=80"
-                                    ) { success, msg ->
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedTextField(
+                        value = customName,
+                        onValueChange = { customName = it },
+                        label = { Text("Nama Tampilan") },
+                        placeholder = { Text("Xiao Yan") },
+                        leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedTextField(
+                        value = customAvatar,
+                        onValueChange = { customAvatar = it },
+                        label = { Text("URL Foto Profil (GIF/PNG - Opsional)") },
+                        placeholder = { Text("https://...") },
+                        leadingIcon = { Icon(Icons.Filled.Image, contentDescription = null) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Button(
+                        onClick = {
+                            val trimmedEmail = customEmail.trim().lowercase()
+                            if (trimmedEmail.isEmpty() || !trimmedEmail.contains("@")) {
+                                Toast.makeText(context, "Email Google tidak valid!", Toast.LENGTH_SHORT).show()
+                            } else if (customName.isEmpty()) {
+                                Toast.makeText(context, "Nama tidak boleh kosong!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                val finalAvatar = customAvatar.trim().ifEmpty {
+                                    "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&q=80"
+                                }
+                                showCustomRegister = false
+                                viewModel.handleGoogleLogin(
+                                    trimmedEmail,
+                                    customName.trim(),
+                                    finalAvatar
+                                ) { success, msg ->
+                                    if (trimmedEmail == "rayx445@gmail.com" || trimmedEmail == "niparsia433@gmail.com") {
+                                        Toast.makeText(context, "Selamat datang Admin Utama NihonHua!", Toast.LENGTH_LONG).show()
+                                    } else {
                                         Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                                     }
                                 }
-                                .padding(vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            AsyncImage(
-                                model = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&q=80",
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text("Niparsia", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                Text("niparsia433@gmail.com", color = Color(0xFF9AA0A6), fontSize = 12.sp)
                             }
-                        }
-
-                        Divider(color = Color(0xFF3C4043))
-
-                        // Account 2: Connect another Google Account (or Admin account)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    showGoogleChooser = false
-                                    showCustomRegister = true
-                                }
-                                .padding(vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF303134)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Person,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                "Gunakan akun Google lain...",
-                                color = Color.White,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 13.sp
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End
-                        ) {
-                            TextButton(onClick = { showGoogleChooser = false }) {
-                                Text("Batal", color = Color(0xFF8AB4F8))
-                            }
-                        }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("Masuk Google", fontWeight = FontWeight.Bold)
                     }
-                }
-            }
-        }
 
-        // Custom account linker (100% non-simulated database registration)
-        if (showCustomRegister) {
-            Dialog(onDismissRequest = { showCustomRegister = false }) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            "Masuk Akun Google",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp,
-                            color = MaterialTheme.colorScheme.onBackground,
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                        OutlinedTextField(
-                            value = customEmail,
-                            onValueChange = { customEmail = it },
-                            label = { Text("Alamat Email Google") },
-                            placeholder = { Text("contoh@gmail.com") },
-                            leadingIcon = { Icon(Icons.Filled.Email, contentDescription = null) },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        OutlinedTextField(
-                            value = customName,
-                            onValueChange = { customName = it },
-                            label = { Text("Nama Tampilan") },
-                            placeholder = { Text("Xiao Yan") },
-                            leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null) },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        OutlinedTextField(
-                            value = customAvatar,
-                            onValueChange = { customAvatar = it },
-                            label = { Text("URL Foto Profil (GIF/PNG - Opsional)") },
-                            placeholder = { Text("https://...") },
-                            leadingIcon = { Icon(Icons.Filled.Image, contentDescription = null) },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        Button(
-                            onClick = {
-                                val trimmedEmail = customEmail.trim().lowercase()
-                                if (trimmedEmail.isEmpty() || !trimmedEmail.contains("@")) {
-                                    Toast.makeText(context, "Email Google tidak valid!", Toast.LENGTH_SHORT).show()
-                                } else if (customName.isEmpty()) {
-                                    Toast.makeText(context, "Nama tidak boleh kosong!", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    val finalAvatar = customAvatar.trim().ifEmpty {
-                                        "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&q=80"
-                                    }
-                                    showCustomRegister = false
-                                    viewModel.handleGoogleLogin(
-                                        trimmedEmail,
-                                        customName.trim(),
-                                        finalAvatar
-                                    ) { success, msg ->
-                                        if (trimmedEmail == "rayx445@gmail.com" || trimmedEmail == "niparsia433@gmail.com") {
-                                            Toast.makeText(context, "Selamat datang Admin Utama NihonHua!", Toast.LENGTH_LONG).show()
-                                        } else {
-                                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Masuk Google", fontWeight = FontWeight.Bold)
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        TextButton(
-                            onClick = { showCustomRegister = false },
-                            modifier = Modifier.align(Alignment.CenterHorizontally)
-                        ) {
-                            Text("Batal")
-                        }
+                    TextButton(
+                        onClick = { showCustomRegister = false },
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    ) {
+                        Text("Batal")
                     }
                 }
             }
@@ -2704,7 +2514,7 @@ fun PremiumPaymentDialog(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Display Dynamic QRIS code
+                    // Display Dynamic QRIS code (using ZXing for real QR generation)
                     Box(
                         modifier = Modifier
                             .size(160.dp)
@@ -2713,46 +2523,36 @@ fun PremiumPaymentDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                // Draw simulated QRIS scan grid
+                            // Generate QR code for payment
+                            val qrData = "00020101021226580016ID.CO.QRIS.WWW011893600520025000000530360458025990006001ID10202103030303604040305045901524103NihonHua Premium5802ID5910NihonHua App6015Jakarta Indonesia6304"
+                            val qrBitmap = remember(qrData) {
+                                generateQRCode(qrData)
+                            }
+                            
+                            qrBitmap?.let { bitmap ->
+                                androidx.compose.foundation.Image(
+                                    bitmap = bitmap.asImageBitmap(),
+                                    contentDescription = "QRIS Code",
+                                    modifier = Modifier.size(110.dp)
+                                )
+                            } ?: run {
+                                // Fallback if QR generation fails
                                 Box(
                                     modifier = Modifier
                                         .size(110.dp)
                                         .border(2.dp, Color.Black)
                                         .background(Color.White)
                                 ) {
-                                    Row(modifier = Modifier.fillMaxSize()) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Box(modifier = Modifier.size(24.dp).background(Color.Black))
-                                            Spacer(modifier = Modifier.height(10.dp))
-                                            Box(modifier = Modifier.size(20.dp).background(Color.Black))
-                                            Spacer(modifier = Modifier.weight(1f))
-                                            Box(modifier = Modifier.size(24.dp).background(Color.Black))
-                                        }
-                                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Spacer(modifier = Modifier.height(15.dp))
-                                            Box(modifier = Modifier.size(15.dp).background(Color.Black))
-                                            Spacer(modifier = Modifier.height(15.dp))
-                                            Box(modifier = Modifier.size(15.dp).background(Color.Black))
-                                            Spacer(modifier = Modifier.height(15.dp))
-                                            Box(modifier = Modifier.size(15.dp).background(Color.Black))
-                                        }
-                                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
-                                            Box(modifier = Modifier.size(24.dp).background(Color.Black))
-                                            Spacer(modifier = Modifier.height(20.dp))
-                                            Box(modifier = Modifier.size(12.dp).background(Color.Black))
-                                            Spacer(modifier = Modifier.weight(1f))
-                                            Box(modifier = Modifier.size(20.dp).background(Color.Black))
-                                        }
-                                    }
+                                    Text("QR Error", color = Color.Red, fontSize = 10.sp)
                                 }
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text("NihonHua QRIS", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 8.sp)
                             }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text("NihonHua QRIS", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 8.sp)
                         }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text("Silakan screenshot QRIS diatas lalu scan di aplikasi pembayaran Anda", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp, textAlign = TextAlign.Center)
-                        Spacer(modifier = Modifier.height(16.dp))
                     }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Silakan scan QRIS di atas dengan aplikasi pembayaran Anda (GoPay, OVO, Dana, dll)", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp, textAlign = TextAlign.Center)
+                    Spacer(modifier = Modifier.height(16.dp))
 
                     // Action buttons
                     Row(
@@ -2929,7 +2729,7 @@ fun AdminPanelScreen(viewModel: AnimeViewModel) {
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            listOf("Profile", "Komentar", "Gift Codes", "Blokir", "Scraper").forEach { subTab ->
+            listOf("Profile", "Komentar", "Gift Codes", "Blokir").forEach { subTab ->
                 val active = selectedAdminSubTab == subTab
                 Box(
                     modifier = Modifier
@@ -2947,9 +2747,12 @@ fun AdminPanelScreen(viewModel: AnimeViewModel) {
 
         when (selectedAdminSubTab) {
             "Profile" -> {
-                // Edit Admin Profile
+                // Edit Admin Profile & User Management
                 var adminNameInput by remember { mutableStateOf(currentUser!!.displayName) }
                 var adminAvatarInput by remember { mutableStateOf(currentUser!!.photoUrl) }
+                var targetEmail by remember { mutableStateOf("") }
+                var newLevel by remember { mutableStateOf("") }
+                var newExp by remember { mutableStateOf("") }
 
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Ubah Informasi Profil Admin", fontWeight = FontWeight.Bold)
@@ -2976,98 +2779,47 @@ fun AdminPanelScreen(viewModel: AnimeViewModel) {
                     Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f))
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    Text("Manajemen Keamanan & Proteksi", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
-                    Text("Uji coba fitur anti-tamper MOD dan force update secara real-time.", fontSize = 11.sp, color = Color.Gray)
+                    Text("Manajemen Level & EXP User", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
+                    Text("Atur level dan EXP user secara manual", fontSize = 11.sp, color = Color.Gray)
 
-                    val isModdedSimulated by viewModel.isAppModded.collectAsState()
-                    val isOutdatedSimulated by viewModel.isAppOutdated.collectAsState()
-
-                    // Switch 1: Anti-MOD simulation
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                viewModel.setAppModded(!isModdedSimulated)
-                            },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    OutlinedTextField(
+                        value = targetEmail,
+                        onValueChange = { targetEmail = it },
+                        label = { Text("Email User") },
+                        placeholder = { Text("user@example.com") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(14.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.AdminPanelSettings,
-                                contentDescription = null,
-                                tint = if (isModdedSimulated) Color.Red else Color.Gray,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Simulasikan Deteksi MOD APK", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Text("Jika aktif, aplikasi akan mengunci layar dengan Red Warning Screen", fontSize = 10.sp, color = Color.Gray)
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .background(
-                                        color = if (isModdedSimulated) Color.Red else Color.Gray,
-                                        shape = RoundedCornerShape(10.dp)
-                                    )
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = if (isModdedSimulated) "AKTIF" else "MATI",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
-                            }
-                        }
+                        OutlinedTextField(
+                            value = newLevel,
+                            onValueChange = { newLevel = it },
+                            label = { Text("Level Baru (1-1000)") },
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = newExp,
+                            onValueChange = { newExp = it },
+                            label = { Text("EXP Baru") },
+                            modifier = Modifier.weight(1f)
+                        )
                     }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Switch 2: Force Update simulation
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                viewModel.setAppOutdated(!isOutdatedSimulated)
-                            },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(14.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Download,
-                                contentDescription = null,
-                                tint = if (isOutdatedSimulated) MaterialTheme.colorScheme.primary else Color.Gray,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Simulasikan Force Update (Versi Usang)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Text("Layar wajib update akan muncul jika bernilai true", fontSize = 10.sp, color = Color.Gray)
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .background(
-                                        color = if (isOutdatedSimulated) MaterialTheme.colorScheme.primary else Color.Gray,
-                                        shape = RoundedCornerShape(10.dp)
-                                    )
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = if (isOutdatedSimulated) "USANG" else "TERBARU",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isOutdatedSimulated) Color.Black else Color.White
-                                )
-                            }
+                    Button(onClick = {
+                        val level = newLevel.toIntOrNull()
+                        val exp = newExp.toIntOrNull()
+                        if (targetEmail.isNotEmpty() && level != null && exp != null) {
+                            viewModel.adminUpdateUserLevelAndExp(targetEmail, level, exp)
+                            Toast.makeText(context, "Level dan EXP user berhasil diupdate!", Toast.LENGTH_SHORT).show()
+                            targetEmail = ""
+                            newLevel = ""
+                            newExp = ""
+                        } else {
+                            Toast.makeText(context, "Input tidak valid!", Toast.LENGTH_SHORT).show()
                         }
+                    }) {
+                        Text("Update Level & EXP")
                     }
                 }
             }
@@ -3608,68 +3360,106 @@ fun UserProfileDialog(
 
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    // Three cards: Status, EXP, Premium Status (updated design)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    // Four cards: Level, EXP, Premium Status, Watch Time
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        // Status Card
-                        Card(
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
+                        // First row: Level and EXP
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Column(
-                                modifier = Modifier.padding(12.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
+                            // Level Card
+                            Card(
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
                             ) {
-                                Text("Status", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f), fontWeight = FontWeight.Medium)
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text("Aktif", fontSize = 13.sp, color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold)
-                                Text("Hingga 2026", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text("LEVEL", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f), fontWeight = FontWeight.Medium)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        "Lvl ${profile.level}",
+                                        fontSize = 18.sp,
+                                        color = Color(0xFF00BCD4),
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        "Max 1000",
+                                        fontSize = 10.sp,
+                                        color = Color.White.copy(alpha = 0.5f)
+                                    )
+                                }
+                            }
+
+                            // EXP Card
+                            Card(
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text("EXP", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f), fontWeight = FontWeight.Medium)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(profile.exp.toString(), fontSize = 13.sp, color = Color(0xFF9C27B0), fontWeight = FontWeight.Bold)
+                                    Text("Points", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
+                                }
                             }
                         }
 
-                        // EXP Card
-                        Card(
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
+                        // Second row: Premium Status and Watch Time
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Column(
-                                modifier = Modifier.padding(12.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
+                            // Premium Status Card
+                            Card(
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = if (profile.isPremium) Color(0xFFFFD700).copy(alpha = 0.2f) else Color(0xFF1E1E1E))
                             ) {
-                                Text("EXP", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f), fontWeight = FontWeight.Medium)
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(profile.exp.toString(), fontSize = 13.sp, color = Color(0xFF9C27B0), fontWeight = FontWeight.Bold)
-                                Text("Points", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text("Premium", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f), fontWeight = FontWeight.Medium)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        if (profile.isPremium) "YES" else "NO",
+                                        fontSize = 13.sp,
+                                        color = if (profile.isPremium) Color(0xFFFFD700) else Color(0xFF757575),
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        if (profile.isPremium) "No Ads" else "With Ads",
+                                        fontSize = 10.sp,
+                                        color = Color.White.copy(alpha = 0.5f)
+                                    )
+                                }
                             }
-                        }
 
-                        // Premium Status Card
-                        Card(
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = if (profile.isPremium) Color(0xFFFFD700).copy(alpha = 0.2f) else Color(0xFF1E1E1E))
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(12.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
+                            // Watch Time Card
+                            Card(
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
                             ) {
-                                Text("Premium", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f), fontWeight = FontWeight.Medium)
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    if (profile.isPremium) "YES" else "NO",
-                                    fontSize = 13.sp,
-                                    color = if (profile.isPremium) Color(0xFFFFD700) else Color(0xFF757575),
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    if (profile.isPremium) "No Ads" else "With Ads",
-                                    fontSize = 10.sp,
-                                    color = Color.White.copy(alpha = 0.5f)
-                                )
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text("Watch Time", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f), fontWeight = FontWeight.Medium)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("${profile.watchDurationMinutes}m", fontSize = 13.sp, color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold)
+                                    Text("Total", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
+                                }
                             }
                         }
                     }

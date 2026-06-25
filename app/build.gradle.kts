@@ -4,6 +4,7 @@ plugins {
   alias(libs.plugins.google.devtools.ksp)
   alias(libs.plugins.roborazzi)
   alias(libs.plugins.secrets)
+  id("com.google.gms.google-services")
 }
 
 android {
@@ -44,7 +45,7 @@ android {
       signingConfig = signingConfigs.getByName("release")
     }
     debug {
-      signingConfig = signingConfigs.getByName("debugConfig")
+      // signingConfig = signingConfigs.getByName("debugConfig")
     }
   }
   compileOptions {
@@ -101,6 +102,13 @@ dependencies {
   implementation(libs.okhttp)
   // implementation(libs.play.services.location)
   implementation(libs.retrofit)
+  // Firebase Auth
+  implementation("com.google.firebase:firebase-auth-ktx:23.1.0")
+  implementation("com.google.android.gms:play-services-auth:21.1.0")
+  implementation("com.google.firebase:firebase-firestore-ktx:25.1.1")
+  // QR Code Generation
+  implementation("com.google.zxing:core:3.5.3")
+  implementation("com.google.zxing:android-core:3.3.0")
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)

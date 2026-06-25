@@ -1,10 +1,13 @@
 package com.example.data
 
 import android.content.Context
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 class AnimeRepository private constructor(context: Context) {
     private val db = AppDatabase.getDatabase(context)
@@ -17,9 +20,36 @@ class AnimeRepository private constructor(context: Context) {
 
     private val repositoryScope = CoroutineScope(Dispatchers.IO)
 
+    // Firebase
+    private val auth = FirebaseAuth.getInstance()
+    private val firestore = FirebaseFirestore.getInstance()
+
     // Logged-in user state
     private val _currentUser = MutableStateFlow<UserProfile?>(null)
     val currentUser: StateFlow<UserProfile?> = _currentUser.asStateFlow()
+
+    // Level calculation based on EXP (up to level 1000)
+    private fun calculateLevel(exp: Int): Int {
+        if (exp < 100) return 1
+        // Formula-based calculation for levels 2-1000
+        // EXP required for level n: 100 * (n-1)^2
+        // This creates exponential progression
+        var level = 1
+        var cumulativeExp = 0
+        while (level < 1000) {
+            val expForNextLevel = 100 * level * level
+            if (exp < cumulativeExp + expForNextLevel) break
+            cumulativeExp += expForNextLevel
+            level++
+        }
+        return level
+    }
+
+    // Get EXP required for next level
+    private fun getExpForNextLevel(currentLevel: Int): Int {
+        if (currentLevel >= 1000) return Int.MAX_VALUE
+        return 100 * currentLevel * currentLevel
+    }
 
     init {
         // Create standard admin user if not exists
@@ -37,7 +67,9 @@ class AnimeRepository private constructor(context: Context) {
                             displayName = displayName,
                             photoUrl = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&q=80",
                             isPremium = true,
-                            premiumExpiration = Long.MAX_VALUE
+                            premiumExpiration = Long.MAX_VALUE,
+                            level = 1000,
+                            exp = 100000000
                         )
                     )
                 }
@@ -60,12 +92,66 @@ class AnimeRepository private constructor(context: Context) {
                 displayName = displayName,
                 photoUrl = photoUrl.ifEmpty { "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&q=80" },
                 isPremium = email == "rayx445@gmail.com" || email == "niparsia433@gmail.com",
-                premiumExpiration = if (email == "rayx445@gmail.com") Long.MAX_VALUE else 0L
+                premiumExpiration = if (email == "rayx445@gmail.com") Long.MAX_VALUE else 0L,
+                level = 1,
+                exp = 0
             )
             profileDao.insertProfile(profile)
+            // Sync to Firestore
+            syncProfileToFirestore(profile)
+        } else {
+            // Sync from Firestore if exists
+            syncProfileFromFirestore(email)
         }
         _currentUser.value = profile
         return true
+    }
+
+    // Firestore sync functions
+    private suspend fun syncProfileToFirestore(profile: UserProfile) {
+        try {
+            val userProfileMap = mapOf(
+                "email" to profile.email,
+                "displayName" to profile.displayName,
+                "photoUrl" to profile.photoUrl,
+                "joinDate" to profile.joinDate,
+                "watchDurationMinutes" to profile.watchDurationMinutes,
+                "commentCount" to profile.commentCount,
+                "isPremium" to profile.isPremium,
+                "premiumExpiration" to profile.premiumExpiration,
+                "watchingList" to profile.watchingList,
+                "exp" to profile.exp,
+                "lastAdWatchTime" to profile.lastAdWatchTime,
+                "level" to profile.level
+            )
+            firestore.collection("users").document(profile.email)
+                .set(userProfileMap)
+                .await()
+        } catch (e: Exception) {
+            // Silent fail for sync errors
+        }
+    }
+
+    private suspend fun syncProfileFromFirestore(email: String) {
+        try {
+            val doc = firestore.collection("users").document(email).get().await()
+            if (doc.exists()) {
+                val firestoreProfile = doc.data
+                val localProfile = profileDao.getProfileSync(email)
+                if (localProfile != null && firestoreProfile != null) {
+                    // Merge data - prefer Firestore for premium status
+                    val mergedProfile = localProfile.copy(
+                        isPremium = firestoreProfile["isPremium"] as? Boolean ?: localProfile.isPremium,
+                        premiumExpiration = (firestoreProfile["premiumExpiration"] as? Long) ?: localProfile.premiumExpiration,
+                        exp = (firestoreProfile["exp"] as? Long)?.toInt() ?: localProfile.exp,
+                        level = (firestoreProfile["level"] as? Long)?.toInt() ?: localProfile.level
+                    )
+                    profileDao.updateProfile(mergedProfile)
+                }
+            }
+        } catch (e: Exception) {
+            // Silent fail for sync errors
+        }
     }
 
     fun logout() {
@@ -82,10 +168,16 @@ class AnimeRepository private constructor(context: Context) {
     }
 
     suspend fun updateProfile(profile: UserProfile) {
-        profileDao.updateProfile(profile)
+        // Recalculate level based on EXP
+        val newLevel = calculateLevel(profile.exp)
+        val updatedProfile = profile.copy(level = newLevel)
+        
+        profileDao.updateProfile(updatedProfile)
         if (_currentUser.value?.email == profile.email) {
-            _currentUser.value = profile
+            _currentUser.value = updatedProfile
         }
+        // Sync to Firestore
+        syncProfileToFirestore(updatedProfile)
     }
 
     // Watch History & Progress Sync
@@ -369,6 +461,8 @@ class AnimeRepository private constructor(context: Context) {
             else -> 0L
         }
 
+        if (addedTimeMs == 0L) return "Tipe premium tidak valid!"
+
         val currentExp = if (user.isPremium && user.premiumExpiration > System.currentTimeMillis()) {
             user.premiumExpiration
         } else {
@@ -382,6 +476,14 @@ class AnimeRepository private constructor(context: Context) {
         )
         updateProfile(updatedProfile)
         return "Berhasil membeli paket premium! Berlaku hingga ${java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(newExp))}"
+    }
+
+    // Admin function to update user level and EXP
+    suspend fun adminUpdateUserLevelAndExp(email: String, level: Int, exp: Int) {
+        val user = profileDao.getProfileSync(email) ?: return
+        val updatedProfile = user.copy(level = level, exp = exp)
+        profileDao.updateProfile(updatedProfile)
+        syncProfileToFirestore(updatedProfile)
     }
 
     companion object {

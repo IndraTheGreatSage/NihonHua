@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "51243377068",
+    "firebase_url": "https://fir-682ed-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "fir-682ed",
+    "storage_bucket": "fir-682ed.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:51243377068:android:124982add82016d8ef5a09",
+        "android_client_info": {
+          "package_name": "com.aistudio.anidong.vtwxpl"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "51243377068-p2oinuib97vem01qtboo5n1n8vmb4loj.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBYbeANGoEG4rYToKTcxvbmFU3U36NhoJw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "51243377068-p2oinuib97vem01qtboo5n1n8vmb4loj.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

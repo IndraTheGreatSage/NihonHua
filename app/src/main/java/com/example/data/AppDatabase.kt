@@ -14,7 +14,7 @@ import androidx.room.RoomDatabase
         PremiumGiftCode::class,
         BlockedUser::class
     ],
-    version = 1,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

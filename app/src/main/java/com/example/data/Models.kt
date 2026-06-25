@@ -15,7 +15,8 @@ data class UserProfile(
     val premiumExpiration: Long = 0L,
     val watchingList: String = "", // Comma-separated anime IDs
     val exp: Int = 0, // Experience points
-    val lastAdWatchTime: Long = 0L // Timestamp of last ad watched
+    val lastAdWatchTime: Long = 0L, // Timestamp of last ad watched
+    val level: Int = 1 // User level based on EXP
 )
 
 @Entity(tableName = "comments")
@@ -104,4 +105,11 @@ data class Episode(
     val episodeNumber: String,
     val videoUrl: String,
     val releaseDate: String = "Baru Saja"
+)
+
+data class AppNotification(
+    val id: Int,
+    val title: String,
+    val message: String,
+    val timestamp: Long = System.currentTimeMillis()
 )
