@@ -79,6 +79,7 @@ fun generateQRCode(content: String): Bitmap? {
 @Composable
 fun MainAppNavigation(
     viewModel: AnimeViewModel,
+    onGoogleSignInRequest: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -96,7 +97,10 @@ fun MainAppNavigation(
     }
 
     if (currentUser == null) {
-        LoginScreen(viewModel = viewModel)
+        LoginScreen(
+            viewModel = viewModel,
+            onGoogleSignInRequest = onGoogleSignInRequest
+        )
     } else {
         Box(modifier = Modifier.fillMaxSize()) {
             Scaffold(
@@ -259,7 +263,10 @@ fun MainAppNavigation(
 
 // 1. LOGIN SCREEN WITH REAL GOOGLE AUTH
 @Composable
-fun LoginScreen(viewModel: AnimeViewModel) {
+fun LoginScreen(
+    viewModel: AnimeViewModel,
+    onGoogleSignInRequest: () -> Unit
+) {
     var customEmail by remember { mutableStateOf("") }
     var customName by remember { mutableStateOf("") }
     var customAvatar by remember { mutableStateOf("") }
@@ -336,7 +343,7 @@ fun LoginScreen(viewModel: AnimeViewModel) {
 
             // Brand-Compliant Google Sign-In Button
             Button(
-                onClick = { viewModel.signInWithGoogle(context) },
+                onClick = { onGoogleSignInRequest() },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),

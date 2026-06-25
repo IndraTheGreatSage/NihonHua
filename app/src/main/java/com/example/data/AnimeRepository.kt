@@ -4,6 +4,7 @@ import android.content.Context
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -20,11 +21,26 @@ class AnimeRepository private constructor(context: Context) {
     private val blockedDao = db.blockedUserDao()
 
     private val firebaseAuth = FirebaseAuth.getInstance()
+    private val firestore = FirebaseFirestore.getInstance()
     private val repositoryScope = CoroutineScope(Dispatchers.IO)
 
     // Logged-in user state
     private val _currentUser = MutableStateFlow<UserProfile?>(null)
     val currentUser: StateFlow<UserProfile?> = _currentUser.asStateFlow()
+
+    // Level calculation based on EXP (up to level 1000)
+    private fun calculateLevel(exp: Int): Int {
+        if (exp < 100) return 1
+        var level = 1
+        var cumulativeExp = 0
+        while (level < 1000) {
+            val expForNextLevel = 100 * level * level
+            if (exp < cumulativeExp + expForNextLevel) break
+            cumulativeExp += expForNextLevel
+            level++
+        }
+        return level
+    }
 
     init {
         // Restore session jika Firebase masih ada user login
@@ -99,12 +115,109 @@ class AnimeRepository private constructor(context: Context) {
                     "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&q=80"
                 },
                 isPremium = email == "rayx445@gmail.com" || email == "niparsia433@gmail.com",
-                premiumExpiration = if (email == "rayx445@gmail.com") Long.MAX_VALUE else 0L
+                premiumExpiration = if (email == "rayx445@gmail.com") Long.MAX_VALUE else 0L,
+                level = 1,
+                exp = 0
             )
             profileDao.insertProfile(profile)
+            syncProfileToFirestore(profile)
+        } else {
+            syncProfileFromFirestore(email)
         }
         _currentUser.value = profile
         return true
+    }
+
+    // Real Firebase Google Auth login
+    suspend fun loginWithFirebaseGoogle(idToken: String): Boolean {
+        return try {
+            val credential = GoogleAuthProvider.getCredential(idToken, null)
+            val authResult = firebaseAuth.signInWithCredential(credential).await()
+            val firebaseUser = authResult.user
+            
+            if (firebaseUser != null) {
+                val email = firebaseUser.email ?: return false
+                val displayName = firebaseUser.displayName ?: "User"
+                val photoUrl = firebaseUser.photoUrl?.toString() ?: ""
+                
+                // Check if blocked
+                val isBlocked = blockedDao.getBlockedUser(email) != null
+                if (isBlocked) {
+                    firebaseAuth.signOut()
+                    return false
+                }
+                
+                var profile = profileDao.getProfileSync(email)
+                if (profile == null) {
+                    profile = UserProfile(
+                        email = email,
+                        displayName = displayName,
+                        photoUrl = photoUrl.ifEmpty { "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&q=80" },
+                        isPremium = email == "rayx445@gmail.com" || email == "niparsia433@gmail.com",
+                        premiumExpiration = if (email == "rayx445@gmail.com") Long.MAX_VALUE else 0L,
+                        level = 1,
+                        exp = 0
+                    )
+                    profileDao.insertProfile(profile)
+                    syncProfileToFirestore(profile)
+                } else {
+                    syncProfileFromFirestore(email)
+                }
+                _currentUser.value = profile
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    // Firestore sync functions
+    private suspend fun syncProfileToFirestore(profile: UserProfile) {
+        try {
+            val userProfileMap = mapOf(
+                "email" to profile.email,
+                "displayName" to profile.displayName,
+                "photoUrl" to profile.photoUrl,
+                "joinDate" to profile.joinDate,
+                "watchDurationMinutes" to profile.watchDurationMinutes,
+                "commentCount" to profile.commentCount,
+                "isPremium" to profile.isPremium,
+                "premiumExpiration" to profile.premiumExpiration,
+                "watchingList" to profile.watchingList,
+                "exp" to profile.exp,
+                "lastAdWatchTime" to profile.lastAdWatchTime,
+                "level" to profile.level
+            )
+            firestore.collection("users").document(profile.email)
+                .set(userProfileMap)
+                .await()
+        } catch (e: Exception) {
+            // Silent fail for sync errors
+        }
+    }
+
+    private suspend fun syncProfileFromFirestore(email: String) {
+        try {
+            val doc = firestore.collection("users").document(email).get().await()
+            if (doc.exists()) {
+                val firestoreProfile = doc.data
+                val localProfile = profileDao.getProfileSync(email)
+                if (localProfile != null && firestoreProfile != null) {
+                    // Merge data - prefer Firestore for premium status
+                    val mergedProfile = localProfile.copy(
+                        isPremium = firestoreProfile["isPremium"] as? Boolean ?: localProfile.isPremium,
+                        premiumExpiration = (firestoreProfile["premiumExpiration"] as? Long) ?: localProfile.premiumExpiration,
+                        exp = (firestoreProfile["exp"] as? Long)?.toInt() ?: localProfile.exp,
+                        level = (firestoreProfile["level"] as? Long)?.toInt() ?: localProfile.level
+                    )
+                    profileDao.updateProfile(mergedProfile)
+                }
+            }
+        } catch (e: Exception) {
+            // Silent fail for sync errors
+        }
     }
 
     fun logout() {
@@ -124,10 +237,16 @@ class AnimeRepository private constructor(context: Context) {
     }
 
     suspend fun updateProfile(profile: UserProfile) {
-        profileDao.updateProfile(profile)
+        // Recalculate level based on EXP
+        val newLevel = calculateLevel(profile.exp)
+        val updatedProfile = profile.copy(level = newLevel)
+        
+        profileDao.updateProfile(updatedProfile)
         if (_currentUser.value?.email == profile.email) {
-            _currentUser.value = profile
+            _currentUser.value = updatedProfile
         }
+        // Sync to Firestore
+        syncProfileToFirestore(updatedProfile)
     }
 
     // Watch History & Progress Sync

@@ -71,9 +71,36 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
     private val _googleSignInError = MutableStateFlow<String?>(null)
     val googleSignInError: StateFlow<String?> = _googleSignInError.asStateFlow()
 
+    // Ad Management for non-premium users
+    private val _shouldShowAd = MutableStateFlow(false)
+    val shouldShowAd: StateFlow<Boolean> = _shouldShowAd.asStateFlow()
+
+    private var lastAdTime: Long = 0
+    private val adInterval: Long = 300000 // 5 minutes
+
     init {
         loadLatestShows()
         generateInitialNotifications()
+    }
+
+    fun checkAdRequirement(): Boolean {
+        val user = currentUser.value
+        if (user?.isPremium == true) return false
+        val currentTime = System.currentTimeMillis()
+        return (currentTime - lastAdTime) > adInterval
+    }
+
+    fun triggerAd() {
+        _shouldShowAd.value = true
+    }
+
+    fun onAdWatched() {
+        _shouldShowAd.value = false
+        lastAdTime = System.currentTimeMillis()
+    }
+
+    fun dismissAd() {
+        _shouldShowAd.value = false
     }
 
     fun loadLatestShows() {
@@ -125,6 +152,37 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
                 onResult(true, "Selamat datang, ${user?.displayName ?: ""}!")
             } else {
                 onResult(false, "Akun Anda telah diblokir atau terjadi kesalahan autentikasi.")
+            }
+        }
+    }
+
+    // Real Google Sign-In with Firebase
+    fun signInWithGoogle(context: android.content.Context) {
+        viewModelScope.launch {
+            try {
+                val googleSignInOptions = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
+                    com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
+                )
+                    .requestIdToken("295876523736-8rj2t9m8q7k5l4n3p1o2i3u4y5t6r7e8.apps.googleusercontent.com")
+                    .requestEmail()
+                    .build()
+
+                val googleSignInClient = com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(context, googleSignInOptions)
+                val signInIntent = googleSignInClient.signInIntent
+                
+                // This needs to be handled in Activity with startActivityForResult
+                // For now, show a message to use the manual fallback
+                android.widget.Toast.makeText(
+                    context,
+                    "Google Sign-In requires Activity integration. Use manual login for now.",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(
+                    context,
+                    "Error: ${e.message}",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
             }
         }
     }
@@ -233,6 +291,17 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
         if (!isUserAdmin(admin.email)) return
         viewModelScope.launch {
             repo.updateProfile(admin.copy(displayName = displayName, photoUrl = photoUrl))
+        }
+    }
+
+    fun adminUpdateUserLevelAndExp(email: String, level: Int, exp: Int) {
+        val admin = currentUser.value ?: return
+        if (!isUserAdmin(admin.email)) return
+        viewModelScope.launch {
+            val user = repo.getProfileSync(email)
+            if (user != null) {
+                repo.updateProfile(user.copy(level = level, exp = exp))
+            }
         }
     }
 
