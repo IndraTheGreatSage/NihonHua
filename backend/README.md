@@ -4,9 +4,9 @@ Backend web scraper API untuk mengambil data anime dan donghua dari berbagai web
 
 ## Fitur
 
-- Scraping dari Anichin.vip (Donghua)
-- Scraping dari Otakudesu.cloud (Anime)
-- Fallback data lokal jika scraping gagal
+- Scraping dari Anichin.moe (Donghua)
+- Scraping dari Bilibili.tv (Anime)
+- Cache hasil scrape tanpa katalog dummy lokal
 - RESTful API dengan Express.js (Node.js)
 - Siap untuk Pterodactyl Panel (Node.js Docker image)
 
@@ -57,17 +57,17 @@ Pterodactyl akan otomatis install dependencies dari package.json dan menjalankan
   "success": true,
   "data": [
     {
-      "id": "btth_s5",
-      "title": "Battle Through The Heavens Season 5",
+      "id": "dh_contoh_judul",
+      "title": "Contoh Judul Donghua",
       "type": "Donghua",
       "image_url": "https://...",
       "description": "...",
-      "rating": "9.8",
+      "rating": "9.5",
       "status": "Ongoing",
       "genres": ["Action", "Cultivation"],
-      "release_year": "2023",
-      "studio": "Motion Magic",
-      "episode_count": 104,
+      "release_year": "2024",
+      "studio": "Anichin Studios",
+      "episode_count": 12,
       "episodes": [...]
     }
   ],

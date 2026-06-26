@@ -8,11 +8,12 @@ import okhttp3.Request
 import okhttp3.logging.HttpLoggingInterceptor
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 object ApiService {
     private const val TAG = "ApiService"
-    private const val BASE_URL = ApiConfig.baseUrl // from ApiConfig.kt
+    private val BASE_URL = ApiConfig.baseUrl // from ApiConfig.kt
     
     private val client: OkHttpClient by lazy {
         val loggingInterceptor = HttpLoggingInterceptor().apply {
@@ -134,6 +135,25 @@ object ApiService {
             null
         }
     }
+
+    suspend fun resolveEpisodeVideoUrl(pageUrl: String): String = withContext(Dispatchers.IO) {
+        try {
+            val encodedUrl = URLEncoder.encode(pageUrl, "UTF-8")
+            val request = Request.Builder()
+                .url("$BASE_URL/api/resolve-video?url=$encodedUrl")
+                .build()
+
+            val response = client.newCall(request).execute()
+            val responseBody = response.body?.string()
+            if (response.isSuccessful && responseBody != null) {
+                JSONObject(responseBody).optString("video_url", pageUrl).ifBlank { pageUrl }
+            } else {
+                pageUrl
+            }
+        } catch (e: Exception) {
+            pageUrl
+        }
+    }
     
     private fun parseAnimeList(json: String): List<AnimeVideo> {
         val jsonObject = JSONObject(json)
@@ -169,6 +189,16 @@ object ApiService {
                 )
             )
         }
+        val uniqueEpisodes = episodes
+            .filterNot { episode ->
+                val title = episode.title.trim().lowercase()
+                val number = episode.episodeNumber.trim()
+                title in setOf("home", "homepage", "beranda", "donghua", "anime", "download", "batch") ||
+                    number.isBlank() ||
+                    number.toFloatOrNull() == null
+            }
+            .distinctBy { it.episodeNumber.filter { char -> char.isDigit() || char == '.' }.ifBlank { it.id } }
+            .sortedWith(compareBy<Episode> { it.episodeNumber.toFloatOrNull() ?: Float.MAX_VALUE }.thenBy { it.episodeNumber })
         
         val genresArray = obj.optJSONArray("genres") ?: JSONArray()
         val genres = mutableListOf<String>()
@@ -188,7 +218,7 @@ object ApiService {
             releaseYear = obj.getString("release_year"),
             studio = obj.optString("studio", "Unknown"),
             episodeCount = obj.optInt("episode_count", 12),
-            episodes = episodes
+            episodes = uniqueEpisodes
         )
     }
     

@@ -43,12 +43,24 @@ class AnimeRepository private constructor(context: Context) {
     }
 
     init {
-        // Restore session jika Firebase masih ada user login
+        // Restore session + sync fresh data from Firebase Auth
         firebaseAuth.currentUser?.let { firebaseUser ->
             repositoryScope.launch {
-                val profile = profileDao.getProfileSync(firebaseUser.email ?: return@launch)
+                val email = firebaseUser.email ?: return@launch
+                val freshName = firebaseUser.displayName ?: email.substringBefore("@")
+                val freshPhoto = firebaseUser.photoUrl?.toString() ?: ""
+                var profile = profileDao.getProfileSync(email)
                 if (profile != null) {
-                    _currentUser.value = profile
+                    // Update displayName & photoUrl from latest Google account
+                    val updated = profile.copy(
+                        displayName = freshName,
+                        photoUrl = if (freshPhoto.isNotEmpty()) freshPhoto else profile.photoUrl
+                    )
+                    profileDao.updateProfile(updated)
+                    _currentUser.value = updated
+                } else {
+                    // Create profile from Firebase data
+                    loginWithGoogle(email, freshName, freshPhoto)
                 }
             }
         }
@@ -172,8 +184,14 @@ class AnimeRepository private constructor(context: Context) {
         }
     }
 
-    fun logout() {
+    fun logout(context: android.content.Context) {
+        // Sign out from Firebase
         firebaseAuth.signOut()
+        // Sign out from Google Sign-In so user can pick different account
+        val gso = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
+            com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
+        ).requestEmail().build()
+        com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(context, gso).signOut()
         _currentUser.value = null
     }
 
@@ -189,6 +207,7 @@ class AnimeRepository private constructor(context: Context) {
     }
 
     suspend fun updateProfile(profile: UserProfile) {
+
         // Recalculate level based on EXP
         val newLevel = calculateLevel(profile.exp)
         val updatedProfile = profile.copy(level = newLevel)
@@ -205,6 +224,15 @@ class AnimeRepository private constructor(context: Context) {
     fun getWatchHistory(email: String): Flow<List<WatchHistory>> {
         return historyDao.getHistoryForUser(email)
     }
+
+    suspend fun addWatchMinutesAndSave(email: String, minutes: Long) {
+        val user = profileDao.getProfileSync(email) ?: return
+        val updatedProfile = user.copy(
+            watchDurationMinutes = user.watchDurationMinutes + minutes
+        )
+        updateProfile(updatedProfile)
+    }
+
 
     suspend fun saveWatchHistory(
         animeId: String,

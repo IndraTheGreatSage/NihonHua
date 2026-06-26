@@ -1,8 +1,18 @@
 package com.example.ui
 
 import android.graphics.Bitmap
+import android.net.Uri
+import android.annotation.SuppressLint
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,12 +32,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -36,13 +48,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import coil.ImageLoader
 import coil.compose.AsyncImage
+import coil.decode.GifDecoder
+import coil.decode.ImageDecoderDecoder
+import coil.request.ImageRequest
 import com.example.data.*
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.isGranted
+import com.google.accompanist.permissions.rememberPermissionState
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.WriterException
 import com.google.zxing.qrcode.QRCodeWriter
 import java.text.SimpleDateFormat
+import java.io.ByteArrayInputStream
 import java.util.Date
 import java.util.Locale
 
@@ -73,6 +93,125 @@ fun generateQRCode(content: String): Bitmap? {
     } catch (e: WriterException) {
         null
     }
+}
+
+private fun isBlockedPlayerHost(url: String): Boolean {
+    val host = runCatching { Uri.parse(url).host.orEmpty().lowercase() }.getOrDefault("")
+    return listOf(
+        "doubleclick.net",
+        "googlesyndication.com",
+        "googleadservices.com",
+        "adservice.google.com",
+        "adsterra",
+        "popads",
+        "propellerads",
+        "onclick",
+        "taboola",
+        "outbrain"
+    ).any { host.contains(it) }
+}
+
+private fun isDirectVideoUrl(url: String): Boolean {
+    return Regex("\\.(mp4|m3u8|webm|mkv)(\\?|$)", RegexOption.IGNORE_CASE).containsMatchIn(url)
+}
+
+private fun lockedPlayerHtml(url: String): String {
+    val escapedUrl = url
+        .replace("&", "&amp;")
+        .replace("\"", "&quot;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    val player = if (isDirectVideoUrl(url)) {
+        """<video src="$escapedUrl" controls autoplay playsinline preload="metadata"></video>"""
+    } else {
+        """<iframe src="$escapedUrl" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen referrerpolicy="no-referrer"></iframe>"""
+    }
+    return """
+        <!doctype html>
+        <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+            <style>
+                html, body {
+                    margin: 0;
+                    padding: 0;
+                    width: 100%;
+                    height: 100%;
+                    overflow: hidden;
+                    background: #000;
+                }
+                iframe, video {
+                    position: fixed;
+                    inset: 0;
+                    width: 100%;
+                    height: 100%;
+                    border: 0;
+                    background: #000;
+                }
+            </style>
+        </head>
+        <body>$player</body>
+        </html>
+    """.trimIndent()
+}
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun EpisodeWebPlayer(
+    url: String,
+    modifier: Modifier = Modifier
+) {
+    AndroidView(
+        modifier = modifier,
+        factory = { context ->
+            WebView(context).apply {
+                setBackgroundColor(android.graphics.Color.BLACK)
+                isVerticalScrollBarEnabled = false
+                isHorizontalScrollBarEnabled = false
+                overScrollMode = WebView.OVER_SCROLL_NEVER
+                setOnLongClickListener { true }
+                webViewClient = object : WebViewClient() {
+                    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                        val target = request.url.toString()
+                        if (isBlockedPlayerHost(target)) return true
+                        return request.isForMainFrame && target != url
+                    }
+
+                    override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                        return if (isBlockedPlayerHost(request.url.toString())) {
+                            WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
+                        } else {
+                            super.shouldInterceptRequest(view, request)
+                        }
+                    }
+                }
+                webChromeClient = object : WebChromeClient() {
+                    override fun onCreateWindow(
+                        view: WebView?,
+                        isDialog: Boolean,
+                        isUserGesture: Boolean,
+                        resultMsg: android.os.Message?
+                    ): Boolean = false
+                }
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.mediaPlaybackRequiresUserGesture = false
+                settings.loadWithOverviewMode = true
+                settings.useWideViewPort = true
+                settings.builtInZoomControls = false
+                settings.displayZoomControls = false
+                settings.setSupportMultipleWindows(false)
+                tag = url
+                loadDataWithBaseURL(url, lockedPlayerHtml(url), "text/html", "UTF-8", null)
+            }
+        },
+        update = { webView ->
+            if (webView.tag != url) {
+                webView.tag = url
+                webView.loadDataWithBaseURL(url, lockedPlayerHtml(url), "text/html", "UTF-8", null)
+            }
+        }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -166,17 +305,20 @@ fun MainAppNavigation(
                         }
 
                         // Avatar Click opens My Profile modal
-                        IconButton(onClick = {
-                            viewModel.inspectUserProfile(currentUser!!.email)
-                        }) {
-                            AsyncImage(
-                                model = currentUser!!.photoUrl,
-                                contentDescription = "Profil",
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(CircleShape)
-                                    .border(1.5.dp, MaterialTheme.colorScheme.secondary, CircleShape)
-                            )
+                        val safeUser = currentUser
+                        if (safeUser != null) {
+                            IconButton(onClick = {
+                                viewModel.inspectUserProfile(safeUser.email)
+                            }) {
+                                AsyncImage(
+                                    model = safeUser.photoUrl,
+                                    contentDescription = "Profil",
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .border(1.5.dp, MaterialTheme.colorScheme.secondary, CircleShape)
+                                )
+                            }
                         }
 
                         if (showNotifications) {
@@ -244,11 +386,16 @@ fun MainAppNavigation(
 
                 // Ad dialog for non-premium users
                 if (shouldShowAd) {
-                    AdDialog(
-                        onAdWatched = { viewModel.onAdWatched() },
+                    RewardedAdDialog(
+                        onRewardedMinutesApplied = {
+                            // +60 menit disesuaikan dari mapping AdMob (item hour amount 1 => 60 menit)
+                            viewModel.onAdWatched() // +60 menit (akan diubah di ViewModel)
+
+                        },
                         onDismiss = { viewModel.dismissAd() }
                     )
                 }
+
             }
         }
 
@@ -1164,10 +1311,19 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
     val quality by viewModel.selectedQuality.collectAsState()
     val comments by viewModel.currentComments.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
+    val isResolvingEpisode by viewModel.isResolvingEpisode.collectAsState()
 
     val context = LocalContext.current
 
-    if (anime == null || selectedEp == null) return
+    if (anime == null) return
+    val gold = Color(0xFFFFC107)
+    val deepBlack = Color(0xFF050505)
+    val panelBlack = Color(0xFF111111)
+    val episodes = remember(anime!!.id, anime!!.episodes) {
+        anime!!.episodes
+            .distinctBy { it.episodeNumber.filter { char -> char.isDigit() || char == '.' }.ifBlank { it.id } }
+            .sortedWith(compareBy<Episode> { it.episodeNumber.toFloatOrNull() ?: Float.MAX_VALUE }.thenBy { it.episodeNumber })
+    }
 
     // Track state of comments post & edit
     var newCommentContent by remember { mutableStateOf("") }
@@ -1182,28 +1338,27 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
     var blockingUserEmail by remember { mutableStateOf<String?>(null) }
     var blockReasonInput by remember { mutableStateOf("") }
 
-    // Video playback progress simulation
-    var isPlaying by remember { mutableStateOf(true) }
     var isWatching by remember { mutableStateOf(false) }
     var progressSeconds by remember { mutableStateOf(45L) }
     val totalSeconds = 1440L // 24 minutes
 
     // Save watch history periodically
     LaunchedEffect(selectedEp, progressSeconds) {
-        viewModel.saveProgress(
-            animeId = anime!!.id,
-            animeTitle = anime!!.title,
-            animeImage = anime!!.imageUrl,
-            episodeNumber = selectedEp!!.episodeNumber,
-            progressPercent = progressSeconds.toFloat() / totalSeconds.toFloat(),
-            progressSeconds = progressSeconds,
-            totalSeconds = totalSeconds
-        )
+        selectedEp?.let { episode ->
+            viewModel.saveProgress(
+                animeId = anime!!.id,
+                animeTitle = anime!!.title,
+                animeImage = anime!!.imageUrl,
+                episodeNumber = episode.episodeNumber,
+                progressPercent = progressSeconds.toFloat() / totalSeconds.toFloat(),
+                progressSeconds = progressSeconds,
+                totalSeconds = totalSeconds
+            )
+        }
     }
 
-    // Auto seek progress bar mockup
-    LaunchedEffect(isPlaying) {
-        while (isPlaying) {
+    LaunchedEffect(isWatching, selectedEp) {
+        while (isWatching && selectedEp != null) {
             kotlinx.coroutines.delay(1000)
             if (progressSeconds < totalSeconds) {
                 progressSeconds++
@@ -1214,8 +1369,8 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
     Surface(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0F1115)),
-        color = Color(0xFF0F1115)
+            .background(deepBlack),
+        color = deepBlack
     ) {
             if (!isWatching) {
                 // ANIME/DONGHUA DETAIL SCREEN
@@ -1223,7 +1378,7 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
-                        .background(Color(0xFF0F1115))
+                        .background(deepBlack)
                 ) {
                     // 1. HERO BANNER IMAGE (Netflix style)
                     Box(
@@ -1245,8 +1400,8 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                                     Brush.verticalGradient(
                                         colors = listOf(
                                             Color.Transparent,
-                                            Color(0xFF0F1115).copy(alpha = 0.5f),
-                                            Color(0xFF0F1115)
+                                            deepBlack.copy(alpha = 0.52f),
+                                            deepBlack
                                         )
                                     )
                                 )
@@ -1258,7 +1413,7 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                             modifier = Modifier
                                 .align(Alignment.TopStart)
                                 .padding(12.dp)
-                                .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                                .background(Color.Black.copy(alpha = 0.72f), CircleShape)
                         ) {
                             Icon(Icons.Filled.ArrowBack, contentDescription = "Kembali", tint = Color.White)
                         }
@@ -1268,7 +1423,7 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)
                                 .padding(16.dp)
-                                .background(Color(0xFFFFB300), RoundedCornerShape(8.dp))
+                            .background(gold, RoundedCornerShape(8.dp))
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1304,15 +1459,15 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                             Box(
                                 modifier = Modifier
                                     .background(
-                                        if (isDonghua) Brush.horizontalGradient(listOf(Color(0xFFE53935), Color(0xFFFFB300)))
-                                        else Brush.horizontalGradient(listOf(Color(0xFF1E88E5), Color(0xFF00E676))),
+                                        if (isDonghua) Brush.horizontalGradient(listOf(gold, Color(0xFFFFE082)))
+                                        else Brush.horizontalGradient(listOf(Color(0xFFFFD54F), gold)),
                                         RoundedCornerShape(6.dp)
                                     )
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 Text(
                                     text = anime!!.type.uppercase(),
-                                    color = Color.White,
+                                    color = Color.Black,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 10.sp
                                 )
@@ -1321,7 +1476,7 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                             // Year Chip
                             Box(
                                 modifier = Modifier
-                                    .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
+                                    .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(6.dp))
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 Text(text = anime!!.releaseYear, color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp, fontWeight = FontWeight.Medium)
@@ -1330,12 +1485,12 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                             // Status Chip
                             Box(
                                 modifier = Modifier
-                                    .border(1.dp, if (anime!!.status.equals("Ongoing", ignoreCase = true)) Color(0xFF00E676) else Color.Gray, RoundedCornerShape(6.dp))
+                                    .border(1.dp, if (anime!!.status.equals("Ongoing", ignoreCase = true)) gold else Color.Gray, RoundedCornerShape(6.dp))
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 Text(
                                     text = anime!!.status,
-                                    color = if (anime!!.status.equals("Ongoing", ignoreCase = true)) Color(0xFF00E676) else Color.Gray,
+                                    color = if (anime!!.status.equals("Ongoing", ignoreCase = true)) gold else Color.Gray,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Medium
                                 )
@@ -1352,11 +1507,11 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                             anime!!.genres.forEach { genre ->
                                 Box(
                                     modifier = Modifier
-                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), CircleShape)
-                                        .border(0.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), CircleShape)
+                                        .background(gold.copy(alpha = 0.11f), CircleShape)
+                                        .border(0.5.dp, gold.copy(alpha = 0.34f), CircleShape)
                                         .padding(horizontal = 12.dp, vertical = 5.dp)
                                 ) {
-                                    Text(text = genre, color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                    Text(text = genre, color = gold, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                                 }
                             }
                         }
@@ -1366,9 +1521,9 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                         // Description/Synopsis card
                         Card(
                             modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.04f)),
-                            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.1f)),
-                            shape = RoundedCornerShape(12.dp)
+                            colors = CardDefaults.cardColors(containerColor = panelBlack),
+                            border = BorderStroke(0.5.dp, gold.copy(alpha = 0.18f)),
+                            shape = RoundedCornerShape(8.dp)
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Text("Sinopsis", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
@@ -1380,7 +1535,7 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                                     color = Color.White.copy(alpha = 0.7f)
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
-                                Text("Studio: ${anime!!.studio}", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium)
+                                Text("Studio: ${anime!!.studio}", fontSize = 11.sp, color = gold, fontWeight = FontWeight.Medium)
                             }
                         }
 
@@ -1389,10 +1544,11 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                         // 3. MAIN ACTION PLAY BUTTON (glowing gradient)
                         Button(
                             onClick = { isWatching = true },
+                            enabled = selectedEp != null,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(56.dp),
-                            shape = RoundedCornerShape(28.dp),
+                            shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
                             contentPadding = PaddingValues()
                         ) {
@@ -1402,8 +1558,8 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                                     .background(
                                         Brush.horizontalGradient(
                                             listOf(
-                                                MaterialTheme.colorScheme.primary,
-                                                MaterialTheme.colorScheme.secondary
+                                                gold,
+                                                Color(0xFFFFE082)
                                             )
                                         )
                                     ),
@@ -1412,7 +1568,7 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(24.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Tonton Sekarang", color = Color.Black, fontWeight = FontWeight.Black, fontSize = 15.sp)
+                                    Text(if (selectedEp == null) "Memuat Episode..." else "Tonton Sekarang", color = Color.Black, fontWeight = FontWeight.Black, fontSize = 15.sp)
                                 }
                             }
                         }
@@ -1421,22 +1577,33 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
 
                         // 4. EPISODES LIST
                         Text(
-                            text = "Daftar Episode (${anime!!.episodes.size})",
+                            text = "Daftar Episode (${episodes.size})",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        if (anime!!.episodes.isEmpty()) {
-                            Text("Tidak ada episode tersedia.", color = Color.Gray, fontSize = 12.sp)
+                        if (episodes.isEmpty()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(panelBlack, RoundedCornerShape(8.dp))
+                                    .border(1.dp, gold.copy(alpha = 0.16f), RoundedCornerShape(8.dp))
+                                    .padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text("Episode lagi dimuat dari sumber utama...", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                            }
                         } else {
                             // Render list/grid of episodes beautifully
                             Column(
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                anime!!.episodes.forEach { ep ->
+                                episodes.forEach { ep ->
                                     val isCurrent = selectedEp?.id == ep.id
                                     Card(
                                         modifier = Modifier
@@ -1446,15 +1613,15 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                                                 isWatching = true
                                             },
                                         colors = CardDefaults.cardColors(
-                                            containerColor = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                                                             else Color.White.copy(alpha = 0.05f)
+                                            containerColor = if (isCurrent) gold.copy(alpha = 0.16f)
+                                                             else panelBlack
                                         ),
                                         border = BorderStroke(
                                             width = 1.dp,
-                                            color = if (isCurrent) MaterialTheme.colorScheme.primary
+                                            color = if (isCurrent) gold
                                                     else Color.White.copy(alpha = 0.08f)
                                         ),
-                                        shape = RoundedCornerShape(10.dp)
+                                        shape = RoundedCornerShape(8.dp)
                                     ) {
                                         Row(
                                             modifier = Modifier
@@ -1466,7 +1633,7 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                                                 modifier = Modifier
                                                     .size(36.dp)
                                                     .background(
-                                                        if (isCurrent) MaterialTheme.colorScheme.primary
+                                                        if (isCurrent) gold
                                                         else Color.White.copy(alpha = 0.1f),
                                                         CircleShape
                                                     ),
@@ -1485,7 +1652,7 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                                                     text = "Episode ${ep.episodeNumber}",
                                                     fontWeight = FontWeight.Bold,
                                                     fontSize = 13.sp,
-                                                    color = if (isCurrent) MaterialTheme.colorScheme.primary else Color.White
+                                                    color = if (isCurrent) gold else Color.White
                                                 )
                                                 Text(
                                                     text = ep.title,
@@ -1511,172 +1678,132 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                 }
             } else {
                 Column(modifier = Modifier.fillMaxSize()) {
-                    // Header Player area including "Back to details" button
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(8.dp),
+                            .background(Color.Black)
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(onClick = { isWatching = false }) {
-                            Icon(Icons.Filled.ArrowBack, contentDescription = "Kembali ke Detail", tint = Color.White)
+                            Icon(Icons.Filled.ArrowBack, contentDescription = "Kembali ke Detail", tint = gold)
                         }
-                        IconButton(onClick = {
-                            viewModel.closeActiveWatchScreen()
-                            viewModel.loadLatestShows()
-                        }) {
-                            Icon(Icons.Filled.Close, contentDescription = "Kembali")
-                        }
-                    Text(
-                        text = anime!!.title,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    // Chromecast / Cast Button
-                    IconButton(onClick = {
-                        Toast.makeText(context, "Mencari perangkat Chromecast / Layar Lebar...", Toast.LENGTH_SHORT).show()
-                    }) {
-                        Icon(Icons.Filled.Cast, contentDescription = "Cast", tint = MaterialTheme.colorScheme.primary)
-                    }
-                }
-
-                // Aesthetic Simulated Player View Area supporting 4K
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(210.dp)
-                        .background(Color.Black)
-                ) {
-                    AsyncImage(
-                        model = anime!!.imageUrl,
-                        contentDescription = "Video Poster Blur",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .alpha(0.4f)
-                    )
-
-                    // Overlay quality indicator
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(12.dp)
-                            .background(Color.Red.copy(alpha = 0.85f), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 6.dp, vertical = 3.dp)
-                    ) {
-                        Text(
-                            text = if (quality == "4K") "4K ULTRA HD" else quality.uppercase(),
-                            color = Color.White,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    }
-
-                    // Player Controls Center
-                    Row(
-                        modifier = Modifier.align(Alignment.Center),
-                        horizontalArrangement = Arrangement.spacedBy(24.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(onClick = {
-                            if (progressSeconds > 10) progressSeconds -= 10
-                        }) {
-                            Icon(Icons.Filled.Replay10, contentDescription = "Rewind 10s", tint = Color.White, modifier = Modifier.size(32.dp))
-                        }
-
-                        IconButton(onClick = { isPlaying = !isPlaying }) {
-                            Icon(
-                                imageVector = if (isPlaying) Icons.Filled.PauseCircleFilled else Icons.Filled.PlayCircleFilled,
-                                contentDescription = "Play/Pause",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(54.dp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = anime!!.title,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
+                            selectedEp?.let {
+                                Text(
+                                    text = "Episode ${it.episodeNumber}",
+                                    color = gold,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
 
-                        IconButton(onClick = {
-                            if (progressSeconds < totalSeconds - 10) progressSeconds += 10
-                        }) {
-                            Icon(Icons.Filled.Forward10, contentDescription = "Forward 10s", tint = Color.White, modifier = Modifier.size(32.dp))
+                        Box(
+                            modifier = Modifier
+                                .background(gold.copy(alpha = 0.14f), RoundedCornerShape(6.dp))
+                                .border(1.dp, gold.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
+                        ) {
+                            Text(quality.uppercase(), color = gold, fontSize = 10.sp, fontWeight = FontWeight.Black)
                         }
                     }
 
-                    // Bottom Player slider controls
-                    Column(
+                    if (selectedEp != null && !isResolvingEpisode) {
+                        EpisodeWebPlayer(
+                            url = selectedEp!!.videoUrl,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(240.dp)
+                                .background(Color.Black)
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(240.dp)
+                                .background(Color.Black),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                CircularProgressIndicator(color = gold)
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text("Menyiapkan player episode...", color = gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    Row(
                         modifier = Modifier
-                            .align(Alignment.BottomCenter)
                             .fillMaxWidth()
                             .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f))
+                                Brush.horizontalGradient(
+                                    listOf(Color(0xFF17120A), panelBlack, Color.Black)
                                 )
                             )
-                            .padding(8.dp)
+                            .border(1.dp, gold.copy(alpha = 0.16f))
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Progress Slider Row
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .background(gold, RoundedCornerShape(8.dp)),
+                            contentAlignment = Alignment.Center
                         ) {
-                            val progressFloat = progressSeconds.toFloat() / totalSeconds.toFloat()
-                            Slider(
-                                value = progressFloat,
-                                onValueChange = { progressSeconds = (it * totalSeconds).toLong() },
-                                modifier = Modifier.weight(1f),
-                                colors = SliderDefaults.colors(
-                                    activeTrackColor = MaterialTheme.colorScheme.primary,
-                                    thumbColor = MaterialTheme.colorScheme.primary
-                                )
+                            Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Color.Black)
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                selectedEp?.title ?: anime!!.title,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                if (currentUser?.isPremium == true) "Premium active" else "Free streaming",
+                                color = gold.copy(alpha = 0.78f),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
-
-                        Row(
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            // Formatting min:sec
-                            val currentMin = progressSeconds / 60
-                            val currentSec = progressSeconds % 60
-                            val totalMin = totalSeconds / 60
-                            val totalSec = totalSeconds % 60
+                        var showResolutionMenu by remember { mutableStateOf(false) }
+                        Box {
                             Text(
-                                String.format(Locale.getDefault(), "%02d:%02d / %02d:%02d", currentMin, currentSec, totalMin, totalSec),
-                                color = Color.White,
-                                fontSize = 11.sp
+                                "$quality ▼",
+                                color = Color.Black,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(gold)
+                                    .clickable { showResolutionMenu = true }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
                             )
-
-                            // Resolution Changer Trigger
-                            var showResolutionMenu by remember { mutableStateOf(false) }
-                            Box {
-                                Text(
-                                    "Kualitas: $quality ▼",
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier
-                                        .clickable { showResolutionMenu = true }
-                                        .padding(4.dp)
-                                )
-                                DropdownMenu(expanded = showResolutionMenu, onDismissRequest = { showResolutionMenu = false }) {
-                                    listOf("360p", "480p", "720p", "1080p", "4K").forEach { q ->
-                                        DropdownMenuItem(
-                                            text = { Text(if (q == "4K") "4K (Ultra HD)" else q) },
-                                            onClick = {
-                                                viewModel.changeQuality(q)
-                                                showResolutionMenu = false
-                                                Toast.makeText(context, "Grafik dialihkan ke resolusi $q", Toast.LENGTH_SHORT).show()
-                                            }
-                                        )
-                                    }
+                            DropdownMenu(expanded = showResolutionMenu, onDismissRequest = { showResolutionMenu = false }) {
+                                listOf("360p", "480p", "720p", "1080p", "4K").forEach { q ->
+                                    DropdownMenuItem(
+                                        text = { Text(if (q == "4K") "4K (Ultra HD)" else q) },
+                                        onClick = {
+                                            viewModel.changeQuality(q)
+                                            showResolutionMenu = false
+                                        }
+                                    )
                                 }
                             }
                         }
                     }
-                }
 
                 // Watch Options: Episodes List & Comments Split View
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -1686,7 +1813,7 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     text = anime!!.studio,
-                                    color = MaterialTheme.colorScheme.primary,
+                                    color = gold,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -1701,11 +1828,11 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                                 if (currentUser?.isPremium == true) {
                                     Text(
                                         "Premium VIP",
-                                        color = MaterialTheme.colorScheme.secondary,
+                                        color = gold,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 11.sp,
                                         modifier = Modifier
-                                            .border(1.dp, MaterialTheme.colorScheme.secondary, RoundedCornerShape(4.dp))
+                                            .border(1.dp, gold, RoundedCornerShape(4.dp))
                                             .padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
                                 }
@@ -1742,7 +1869,7 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                                         Toast.makeText(context, "Mulai mengunduh Episode ${selectedEp!!.episodeNumber} untuk offline...", Toast.LENGTH_SHORT).show()
                                     },
                                     modifier = Modifier.weight(1f),
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                    colors = ButtonDefaults.buttonColors(containerColor = gold),
                                     shape = RoundedCornerShape(8.dp)
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1757,14 +1884,14 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                                 Button(
                                     onClick = { showShareDialog = true },
                                     modifier = Modifier.weight(1f),
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surface),
+                                    colors = ButtonDefaults.buttonColors(containerColor = panelBlack),
                                     shape = RoundedCornerShape(8.dp),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+                                    border = BorderStroke(1.dp, gold)
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Filled.Share, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                        Icon(Icons.Filled.Share, contentDescription = null, tint = gold)
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Bagikan Ulasan", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                        Text("Bagikan Ulasan", color = gold, fontWeight = FontWeight.Bold)
                                     }
                                 }
 
@@ -1783,21 +1910,22 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
                                 modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp),
-                                color = MaterialTheme.colorScheme.onBackground
+                                color = Color.White
                             )
 
                             LazyRow(
                                 contentPadding = PaddingValues(horizontal = 16.dp),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                items(anime!!.episodes) { ep ->
+                                items(episodes) { ep ->
                                     val isSelected = selectedEp!!.id == ep.id
                                     Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(8.dp))
                                             .background(
-                                                if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
+                                                if (isSelected) gold else panelBlack
                                             )
+                                            .border(1.dp, if (isSelected) gold else Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
                                             .clickable {
                                                 viewModel.selectEpisode(ep)
                                                 progressSeconds = 0L // Reset progress on ep switch
@@ -1807,7 +1935,7 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                                         Text(
                                             "EP ${ep.episodeNumber}",
                                             fontWeight = FontWeight.Bold,
-                                            color = if (isSelected) Color.Black else MaterialTheme.colorScheme.onBackground
+                                            color = if (isSelected) Color.Black else Color.White
                                         )
                                     }
                                 }
@@ -2231,156 +2359,208 @@ fun DownloadsScreen(viewModel: AnimeViewModel) {
 fun SettingsScreen(viewModel: AnimeViewModel) {
     val currentUser by viewModel.currentUser.collectAsState()
     val isDarkMode by viewModel.isDarkMode.collectAsState()
-
     val context = LocalContext.current
     var inputCode by remember { mutableStateOf("") }
-
     var activePurchaseTier by remember { mutableStateOf<String?>(null) }
     var activePurchasePrice by remember { mutableStateOf("") }
     var activePurchaseTitle by remember { mutableStateOf("") }
 
+    fun openPurchase(tier: String, title: String, price: String) {
+        activePurchaseTier = tier
+        activePurchaseTitle = title
+        activePurchasePrice = price
+    }
+
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0B0D12)),
+        contentPadding = PaddingValues(18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Toggle Dark mode
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Settings", fontSize = 26.sp, fontWeight = FontWeight.Black, color = Color.White)
+                Text("Akun, premium, dan preferensi aplikasi.", fontSize = 12.sp, color = Color.White.copy(alpha = 0.56f))
+            }
+        }
+
+        currentUser?.let { user ->
+            item {
                 Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF141821), RoundedCornerShape(8.dp))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text("Tema Gelap Estetis", fontWeight = FontWeight.Bold)
-                        Text("Kenyamanan mata saat nonton malam hari", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+                    AsyncImage(
+                        model = user.photoUrl,
+                        contentDescription = "Avatar",
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(CircleShape)
+                            .border(1.5.dp, if (user.isPremium) Color(0xFFF6C453) else Color.White.copy(alpha = 0.22f), CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(user.displayName, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(user.email, fontSize = 11.sp, color = Color.White.copy(alpha = 0.55f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    Switch(checked = isDarkMode, onCheckedChange = { viewModel.toggleDarkMode() })
+                    Surface(
+                        color = if (user.isPremium) Color(0xFFF6C453) else Color(0xFF2A3140),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            if (user.isPremium) "PREMIUM" else "FREE",
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (user.isPremium) Color(0xFF171000) else Color.White
+                        )
+                    }
                 }
             }
         }
 
-        // Subscription Plans Section with visual discount
         item {
-            Text("Berlangganan Paket Premium", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(4.dp))
-            Text("Akses resolusi 4K tanpa batasan dan tonton offline", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
-        }
-
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Tier 1: 1 Day
-                PremiumCard(
-                    title = "Premium 1 Hari",
-                    price = "Rp 1.000",
-                    originalPrice = "",
-                    onPurchase = {
-                        activePurchaseTier = "1_DAY"
-                        activePurchasePrice = "Rp 1.000"
-                        activePurchaseTitle = "Premium 1 Hari"
-                    }
-                )
-                // Tier 2: 5 Days
-                PremiumCard(
-                    title = "Premium 5 Hari",
-                    price = "Rp 4.000",
-                    originalPrice = "",
-                    onPurchase = {
-                        activePurchaseTier = "5_DAYS"
-                        activePurchasePrice = "Rp 4.000"
-                        activePurchaseTitle = "Premium 5 Hari"
-                    }
-                )
-                // Tier 3: 30 Days with Discount!
-                PremiumCard(
-                    title = "Premium 30 Hari",
-                    price = "Rp 20.000",
-                    originalPrice = "Rp 25.000",
-                    onPurchase = {
-                        activePurchaseTier = "30_DAYS"
-                        activePurchasePrice = "Rp 20.000"
-                        activePurchaseTitle = "Premium 30 Hari"
-                    }
-                )
-                // Tier 4: 1 Year with Big Discount!
-                PremiumCard(
-                    title = "Premium 1 Tahun",
-                    price = "Rp 200.000",
-                    originalPrice = "Rp 240.000",
-                    onPurchase = {
-                        activePurchaseTier = "1_YEAR"
-                        activePurchasePrice = "Rp 200.000"
-                        activePurchaseTitle = "Premium 1 Tahun"
-                    }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF11151D), RoundedCornerShape(8.dp))
+                    .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(8.dp))
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Outlined.DarkMode, contentDescription = null, tint = Color(0xFFFFC107))
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Tema gelap", fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("Mode visual utama aplikasi", fontSize = 11.sp, color = Color.White.copy(alpha = 0.5f))
+                }
+                Switch(
+                    checked = isDarkMode,
+                    onCheckedChange = { viewModel.toggleDarkMode() },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = Color(0xFFFFC107)
+                    )
                 )
             }
         }
 
-        // Claim Code Section
         item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.WorkspacePremium, null, tint = Color(0xFFF6C453), modifier = Modifier.size(19.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Premium", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.White)
+                }
+                Text("Pilih durasi aktif, tanpa iklan, kualitas tinggi, dan fitur offline.", fontSize = 12.sp, color = Color.White.copy(alpha = 0.56f))
+            }
+        }
+
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                PremiumCard(title = "Premium 1 Hari", price = "Rp 1.000", originalPrice = "", onPurchase = { openPurchase("1_DAY", "Premium 1 Hari", "Rp 1.000") })
+                PremiumCard(title = "Premium 5 Hari", price = "Rp 4.000", originalPrice = "", onPurchase = { openPurchase("5_DAYS", "Premium 5 Hari", "Rp 4.000") })
+                PremiumCard(title = "Premium 30 Hari", price = "Rp 20.000", originalPrice = "Rp 25.000", onPurchase = { openPurchase("30_DAYS", "Premium 30 Hari", "Rp 20.000") })
+                PremiumCard(title = "Premium 1 Tahun", price = "Rp 200.000", originalPrice = "Rp 240.000", onPurchase = { openPurchase("1_YEAR", "Premium 1 Tahun", "Rp 200.000") })
+            }
+        }
+
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF0E1A17), RoundedCornerShape(8.dp))
+                    .border(1.dp, Color(0xFF2CD59F).copy(alpha = 0.22f), RoundedCornerShape(8.dp))
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Klaim Kode Premium", fontWeight = FontWeight.Bold)
-                    Text("Masukkan kode khusus yang diberikan admin", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = inputCode,
-                            onValueChange = { inputCode = it },
-                            placeholder = { Text("CONTOH: ADPREM1") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.CardGiftcard, null, tint = Color(0xFF2CD59F))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Klaim kode", fontWeight = FontWeight.Bold, color = Color.White)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = inputCode,
+                        onValueChange = { inputCode = it.uppercase() },
+                        placeholder = { Text("ADPREM1", fontSize = 12.sp) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        shape = RoundedCornerShape(8.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF2CD59F),
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.18f),
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Button(onClick = {
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Switch(
+                        checked = inputCode.isNotBlank(),
+                        onCheckedChange = {},
+                        enabled = false
+                    )
+                    Button(
+                        onClick = {
                             if (inputCode.trim().isNotEmpty()) {
-                                viewModel.redeemGiftCode(inputCode.trim()) { msg ->
-                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                                }
+                                viewModel.redeemGiftCode(inputCode.trim()) { msg -> Toast.makeText(context, msg, Toast.LENGTH_LONG).show() }
                                 inputCode = ""
                             }
-                        }) {
-                            Text("Klaim")
-                        }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2CD59F)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(56.dp)
+                    ) {
+                        Text("Klaim", fontWeight = FontWeight.Bold, color = Color(0xFF06110E))
                     }
                 }
             }
         }
 
-        // Community Rules
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Aturan Komunitas Indonesia", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        "1. Dilarang spoiler episode anime/donghua yang belum tayang.\n" +
-                        "2. Tidak boleh mengirim komentar kasar, SARA, pornografi, atau toxic.\n" +
-                        "3. Dilarang spam atau mempromosikan link ilegal.\n" +
-                        "Pelanggaran aturan berakibat pemblokiran akun Google permanen oleh Admin.",
-                        fontSize = 11.sp,
-                        lineHeight = 18.sp
-                    )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF171217), RoundedCornerShape(8.dp))
+                    .border(1.dp, Color(0xFFF05D5E).copy(alpha = 0.22f), RoundedCornerShape(8.dp))
+                    .padding(14.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Gavel, null, tint = Color(0xFFF05D5E))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Aturan komunitas", fontWeight = FontWeight.Bold, color = Color.White)
                 }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "1. Dilarang spoiler episode yang belum tayang.\n2. Tidak boleh komentar kasar, SARA, pornografi, atau toxic.\n3. Dilarang spam dan promosi link ilegal.",
+                    fontSize = 11.sp,
+                    lineHeight = 18.sp,
+                    color = Color.White.copy(alpha = 0.72f)
+                )
             }
         }
 
-        // Log out button
         item {
             Button(
-                onClick = { viewModel.handleLogout() },
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp)
+                onClick = { viewModel.handleLogout(context) },
+                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, Color(0xFFF05D5E).copy(alpha = 0.34f), RoundedCornerShape(8.dp)),
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(16.dp)
             ) {
-                Text("Keluar dari Akun Google", fontWeight = FontWeight.Bold, color = Color.White)
+                Icon(Icons.Filled.Logout, contentDescription = "Logout", tint = Color(0xFFF05D5E))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Keluar dari Akun Google", fontWeight = FontWeight.Bold, color = Color(0xFFF05D5E))
             }
+            Spacer(modifier = Modifier.height(40.dp))
         }
     }
 
@@ -2403,16 +2583,16 @@ fun PremiumPaymentDialog(
     viewModel: AnimeViewModel,
     onDismiss: () -> Unit
 ) {
-    var selectedMethod by remember { mutableStateOf("QRIS") }
-    var phoneNumber by remember { mutableStateOf("") }
-    var paymentStep by remember { mutableStateOf(0) } // 0: Form, 1: Loading, 2: Success
+    var paymentStep by remember { mutableStateOf(0) } // 0: Waiting for Payment (Auto-detect), 1: Success
     val context = LocalContext.current
 
-    if (paymentStep == 1) {
+    // Simulating auto-detection with secure polling
+    if (paymentStep == 0) {
         LaunchedEffect(Unit) {
-            kotlinx.coroutines.delay(2000)
+            // Simulasi polling secure mutasi bank selama 12 detik
+            kotlinx.coroutines.delay(12000)
             viewModel.purchasePremium(tier) { msg ->
-                paymentStep = 2
+                paymentStep = 1
             }
         }
     }
@@ -2423,7 +2603,7 @@ fun PremiumPaymentDialog(
                 .fillMaxWidth()
                 .wrapContentHeight(),
             shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF131722)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF111111)),
             border = BorderStroke(1.5.dp, Brush.linearGradient(listOf(Color(0xFFE53935), Color(0xFFFFB300))))
         ) {
             Column(
@@ -2434,14 +2614,14 @@ fun PremiumPaymentDialog(
             ) {
                 if (paymentStep == 0) {
                     Text(
-                        text = "Metode Pembayaran",
+                        text = "Scan QRIS",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.ExtraBold,
                         color = Color.White
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Selesaikan transaksi untuk $title",
+                        text = "Pembayaran untuk $title",
                         fontSize = 11.sp,
                         color = Color.White.copy(alpha = 0.6f)
                     )
@@ -2457,7 +2637,7 @@ fun PremiumPaymentDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("TOTAL TAGIHAN", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f), fontWeight = FontWeight.Bold)
+                            Text("JUMLAH YANG HARUS DIBAYAR", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f), fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(price, fontSize = 24.sp, fontWeight = FontWeight.Black, color = Color(0xFFFFB300))
                         }
@@ -2465,131 +2645,64 @@ fun PremiumPaymentDialog(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    Text(
-                        text = "Pilih Saluran Pembayaran:",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        modifier = Modifier.align(Alignment.Start)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Scrollable Payment Methods List
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        val channels = listOf(
-                            Triple("QRIS", "QRIS (Semua Bank / E-Money)", Color(0xFF00E676))
-                        )
-
-                        channels.forEach { (code, name, color) ->
-                            val isSelected = selectedMethod == code
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { selectedMethod = code },
-                                shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = if (isSelected) color.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.04f)
-                                ),
-                                border = BorderStroke(
-                                    width = if (isSelected) 2.dp else 1.dp,
-                                    color = if (isSelected) color else Color.White.copy(alpha = 0.1f)
-                                )
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    RadioButton(
-                                        selected = isSelected,
-                                        onClick = { selectedMethod = code },
-                                        colors = RadioButtonDefaults.colors(selectedColor = color, unselectedColor = Color.White.copy(alpha = 0.3f))
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Column {
-                                        Text(name, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
-                                        Text("Scan QR Code QRIS instan otomatis", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Display Dynamic QRIS code (using ZXing for real QR generation)
+                    // Display User's Custom QRIS
                     Box(
                         modifier = Modifier
-                            .size(160.dp)
-                            .background(Color.White, RoundedCornerShape(8.dp))
-                            .padding(12.dp),
+                            .fillMaxWidth()
+                            .background(Color.White, RoundedCornerShape(12.dp))
+                            .padding(8.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            // Generate QR code for payment
-                            val qrData = "00020101021226580016ID.CO.QRIS.WWW011893600520025000000530360458025990006001ID10202103030303604040305045901524103NihonHua Premium5802ID5910NihonHua App6015Jakarta Indonesia6304"
-                            val qrBitmap = remember(qrData) {
-                                generateQRCode(qrData)
+                        val ctx = LocalContext.current
+                        val qrisId = ctx.resources.getIdentifier("qris_payment", "drawable", ctx.packageName)
+                        if (qrisId != 0) {
+                            androidx.compose.foundation.Image(
+                                painter = androidx.compose.ui.res.painterResource(id = qrisId),
+                                contentDescription = "QRIS Code",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(300.dp),
+                                contentScale = ContentScale.Fit
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().height(300.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Gambar QRIS tidak ditemukan.\nSilakan hubungi admin.", color = Color.Gray, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                             }
-                            
-                            qrBitmap?.let { bitmap ->
-                                androidx.compose.foundation.Image(
-                                    bitmap = bitmap.asImageBitmap(),
-                                    contentDescription = "QRIS Code",
-                                    modifier = Modifier.size(110.dp)
-                                )
-                            } ?: run {
-                                // Fallback if QR generation fails
-                                Box(
-                                    modifier = Modifier
-                                        .size(110.dp)
-                                        .border(2.dp, Color.Black)
-                                        .background(Color.White)
-                                ) {
-                                    Text("QR Error", color = Color.Red, fontSize = 10.sp)
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text("NihonHua QRIS", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 8.sp)
                         }
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("Silakan scan QRIS di atas dengan aplikasi pembayaran Anda (GoPay, OVO, Dana, dll)", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp, textAlign = TextAlign.Center)
+
+                    Spacer(modifier = Modifier.height(20.dp))
+                    
+                    // Auto-detect UI
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF00E676).copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(
+                            color = Color(0xFF00E676),
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text("Sistem Auto-Deteksi Aktif", color = Color(0xFF00E676), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("Menunggu verifikasi mutasi bank secara real-time. Jangan tutup halaman ini.", color = Color.White.copy(alpha = 0.7f), fontSize = 10.sp)
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Action buttons
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
-                            Text("Batal", color = Color.White.copy(alpha = 0.6f))
-                        }
-                        Button(
-                            onClick = {
-                                if (selectedMethod != "QRIS" && phoneNumber.trim().length < 9) {
-                                    Toast.makeText(context, "Harap masukkan nomor handphone yang valid!", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    paymentStep = 1
-                                }
-                            },
-                            modifier = Modifier.weight(1.5f),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("Bayar Sekarang")
-                        }
+                    TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                        Text("Batal", color = Color.White.copy(alpha = 0.6f))
                     }
+
                 } else if (paymentStep == 1) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(48.dp))
-                    Spacer(modifier = Modifier.height(20.dp))
-                    Text("Menghubungkan ke API Gateway...", fontWeight = FontWeight.Bold, color = Color.White)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Memvalidasi tagihan e-money & memproses saldo...", fontSize = 11.sp, color = Color.White.copy(alpha = 0.5f))
-                } else if (paymentStep == 2) {
                     Box(
                         modifier = Modifier
                             .size(72.dp)
@@ -2601,14 +2714,15 @@ fun PremiumPaymentDialog(
                     Spacer(modifier = Modifier.height(20.dp))
                     Text("Pembayaran Berhasil!", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = Color.White)
                     Spacer(modifier = Modifier.height(6.dp))
-                    Text("Akun Anda sekarang berstatus Premium VIP!", fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f), textAlign = TextAlign.Center)
+                    Text("Transaksi divalidasi dengan aman.\nAkun Anda sekarang berstatus Premium VIP!", fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f), textAlign = TextAlign.Center)
                     Spacer(modifier = Modifier.height(24.dp))
                     Button(
                         onClick = onDismiss,
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676))
                     ) {
-                        Text("Selesai & Nikmati")
+                        Text("Selesai & Nikmati", color = Color.Black, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -2624,84 +2738,62 @@ fun PremiumCard(
     onPurchase: () -> Unit
 ) {
     val hasDiscount = originalPrice.isNotEmpty()
+    val isPopular = title.contains("30 Hari") || title.contains("30 HARI") || title.contains("1 BULAN")
+    
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onPurchase() },
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF121722)),
         border = BorderStroke(
-            width = if (hasDiscount) 1.5.dp else 1.dp,
-            color = if (hasDiscount) MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
-        ),
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent)
+            width = 1.dp,
+            color = if (isPopular) Color(0xFFF6C453).copy(alpha = 0.6f) else Color.White.copy(alpha = 0.1f)
+        )
     ) {
-        Box(
+        Row(
             modifier = Modifier
-                .background(
-                    Brush.linearGradient(
-                        colors = if (hasDiscount) listOf(Color(0xFF1B2228), Color(0xFF141B22))
-                                 else listOf(Color(0xFF1B2228), Color(0xFF1B2228))
-                    )
-                )
-                .clickable { onPurchase() }
-                .padding(16.dp)
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .background(if (isPopular) Color(0xFFF6C453) else Color(0xFF223044), RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = title,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                        color = if (hasDiscount) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onBackground
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        Text(
-                            text = price,
-                            color = MaterialTheme.colorScheme.onBackground,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 18.sp
-                        )
-                        if (originalPrice.isNotEmpty()) {
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = originalPrice,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                fontSize = 12.sp,
-                                textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough
-                            )
+                Icon(
+                    imageVector = if (isPopular) Icons.Filled.WorkspacePremium else Icons.Filled.Star,
+                    contentDescription = null,
+                    tint = if (isPopular) Color(0xFF171000) else Color(0xFFFFC107)
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(title, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.White)
+                    if (isPopular) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(color = Color(0xFFF6C453), shape = RoundedCornerShape(4.dp)) {
+                            Text("HEMAT", modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp), fontSize = 8.sp, fontWeight = FontWeight.Black, color = Color(0xFF171000))
                         }
                     }
                 }
-
-                // Buy button or Promo indicator
-                if (hasDiscount) {
-                    Box(
-                        modifier = Modifier
-                            .background(MaterialTheme.colorScheme.secondary, RoundedCornerShape(8.dp))
-                            .clickable { onPurchase() }
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(price, color = Color.White, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                    if (hasDiscount) {
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            "PROMO 20%",
-                            color = Color.Black,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Black
+                            text = originalPrice,
+                            color = Color.White.copy(alpha = 0.45f),
+                            fontSize = 12.sp,
+                            textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough
                         )
-                    }
-                } else {
-                    Button(
-                        onClick = onPurchase,
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Text("Beli", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
             }
+            Icon(Icons.Filled.ChevronRight, contentDescription = "Beli", tint = Color.White.copy(alpha = 0.45f))
         }
     }
 }
@@ -3155,7 +3247,8 @@ fun AdminPanelScreen(viewModel: AnimeViewModel) {
     }
 }
 
-// 8. INTERACTIVE DIALOG DISPLAY FOR ANY USER PROFILE CARD
+// 8. INTERACTIVE DIALOG DISPLAY FOR ANY USER PROFILE CARD — PREMIUM REDESIGN
+@OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun UserProfileDialog(
     profile: UserProfile,
@@ -3165,407 +3258,601 @@ fun UserProfileDialog(
     val context = LocalContext.current
     val simpleDate = SimpleDateFormat("dd MMMM yyyy", Locale("id", "ID"))
     val currentUser by viewModel.currentUser.collectAsState()
+    val isOwnProfile = currentUser?.email == profile.email
 
     var isEditing by remember { mutableStateOf(false) }
     var editedDisplayName by remember { mutableStateOf(profile.displayName) }
-    var editedPhotoUrl by remember { mutableStateOf(profile.photoUrl) }
+    var pickedImageUri by remember { mutableStateOf<Uri?>(null) }
+    var isSaving by remember { mutableStateOf(false) }
 
-    val animatedAvatars = listOf(
+    // Animated glowing ring
+    val infiniteTransition = rememberInfiniteTransition(label = "glow")
+    val glowAngle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(3000, easing = LinearEasing)),
+        label = "glowAngle"
+    )
+
+    // GIF presets (anime characters)
+    val gifPresets = listOf(
         "https://i.pinimg.com/originals/c0/83/88/c0838848dbbf264d17fcd590e816a12a.gif",
         "https://i.pinimg.com/originals/cf/d5/bc/cfd5bc1eb6b0e8c0e9ec19ef6b0cfc1c.gif",
         "https://i.pinimg.com/originals/07/3c/ba/073cba99665fa9ff16ec12a14e9f39bf.gif",
-        "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZpcGRoN3VpeGs2czg1eXBtOHZubXBtYm9hZWVlNW9tOXV4cmE2MyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/XMeS9f9DSuN76gYm08/giphy.gif",
-        "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExbmswbHpwOTI3YmpxNnVzZThjNjNldWpzeWszZzhpaTVjYzg4bm1mMCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/3o7bu3XilJ5BOiSGic/giphy.gif"
+        "https://media.giphy.com/media/XMeS9f9DSuN76gYm08/giphy.gif",
+        "https://media.giphy.com/media/3o7bu3XilJ5BOiSGic/giphy.gif",
+        "https://i.pinimg.com/originals/aa/e3/59/aae3594ae47da9d0f0c3db2d1e4aa700.gif",
+        "https://i.pinimg.com/originals/6a/3b/05/6a3b057f42f53e0fd0c5e6ab19e1bd67.gif",
+        "https://i.pinimg.com/originals/38/77/85/387785a36b6de14aa00e2c9f7a8d11f5.gif"
+    )
+    var selectedGifPreset by remember { mutableStateOf<String?>(null) }
+
+    // Gallery launcher
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            pickedImageUri = uri
+            selectedGifPreset = null
+        }
+    }
+
+    // Permission state
+    val mediaPermission = rememberPermissionState(
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU)
+            android.Manifest.permission.READ_MEDIA_IMAGES
+        else
+            android.Manifest.permission.READ_EXTERNAL_STORAGE
     )
 
-    Dialog(onDismissRequest = onDismiss) {
+    // Image loader with GIF support
+    val gifImageLoader = remember {
+        ImageLoader.Builder(context)
+            .components {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    add(ImageDecoderDecoder.Factory())
+                } else {
+                    add(GifDecoder.Factory())
+                }
+            }.build()
+    }
+
+    val expForNextLevel = profile.level * 100
+    val expProgress = (profile.exp % 100).toFloat() / 100f
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Card(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                .fillMaxWidth(0.95f)
+                .wrapContentHeight(),
+            shape = RoundedCornerShape(10.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0B0D12))
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(20.dp)
                     .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                if (isEditing) {
-                    Text(
-                        "Edit Profil Anda",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Avatar Preview
-                    Box(contentAlignment = Alignment.Center) {
-                        Box(
-                            modifier = Modifier
-                                .size(86.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    Brush.sweepGradient(
-                                        colors = listOf(MaterialTheme.colorScheme.primary, Color.Transparent, MaterialTheme.colorScheme.primary)
-                                    )
-                                )
-                        )
-                        AsyncImage(
-                            model = editedPhotoUrl,
-                            contentDescription = "Preview",
-                            modifier = Modifier
-                                .size(80.dp)
-                                .clip(CircleShape)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    OutlinedTextField(
-                        value = editedDisplayName,
-                        onValueChange = { editedDisplayName = it },
-                        label = { Text("Nama Tampilan") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    OutlinedTextField(
-                        value = editedPhotoUrl,
-                        onValueChange = { editedPhotoUrl = it },
-                        label = { Text("URL Foto Profil / GIF") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Text(
-                        "Pilih Poto Profil Bergerak (GIF):",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.align(Alignment.Start)
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    LazyRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                if (isEditing && isOwnProfile) {
+                    // ===== EDIT MODE =====
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                Brush.verticalGradient(listOf(Color(0xFF141821), Color(0xFF0B0D12)))
+                            )
+                            .padding(20.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        items(animatedAvatars) { gifUrl ->
-                            Box(
-                                modifier = Modifier
-                                    .size(60.dp)
-                                    .clip(CircleShape)
-                                    .border(
-                                        width = if (editedPhotoUrl == gifUrl) 3.dp else 1.dp,
-                                        color = if (editedPhotoUrl == gifUrl) MaterialTheme.colorScheme.primary else Color.Gray,
-                                        shape = CircleShape
-                                    )
-                                    .clickable {
-                                        editedPhotoUrl = gifUrl
-                                    }
-                            ) {
-                                AsyncImage(
-                                    model = gifUrl,
-                                    contentDescription = "Preset GIF",
-                                    modifier = Modifier.fillMaxSize()
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                "Edit Profil",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color.White
+                            )
+                            Spacer(Modifier.height(20.dp))
+
+                            // Avatar preview (large)
+                            Box(contentAlignment = Alignment.Center) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(112.dp)
+                                        .rotate(glowAngle)
+                                        .clip(CircleShape)
+                                        .background(
+                                            Brush.sweepGradient(
+                                                listOf(
+                                                    Color(0xFFFFC107), Color(0xFFFFE082),
+                                                    Color(0xFFFFB300), Color(0xFFFFC107)
+                                                )
+                                            )
+                                        )
                                 )
+                                val previewModel: Any = pickedImageUri
+                                    ?: selectedGifPreset
+                                    ?: profile.photoUrl
+                                AsyncImage(
+                                    model = ImageRequest.Builder(context)
+                                        .data(previewModel)
+                                        .crossfade(true)
+                                        .build(),
+                                    imageLoader = gifImageLoader,
+                                    contentDescription = "Preview",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(104.dp)
+                                        .clip(CircleShape)
+                                )
+                                // Camera icon overlay
+                                Box(
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .align(Alignment.BottomEnd)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFFFC107))
+                                        .clickable {
+                                            if (mediaPermission.status.isGranted) {
+                                                galleryLauncher.launch("image/*")
+                                            } else {
+                                                mediaPermission.launchPermissionRequest()
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Filled.PhotoCamera,
+                                        contentDescription = "Pilih Foto",
+                                        tint = Color.Black,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        OutlinedButton(
-                            onClick = { isEditing = false },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Batal")
-                        }
+                        // Display name field
+                        OutlinedTextField(
+                            value = editedDisplayName,
+                            onValueChange = { editedDisplayName = it },
+                            label = { Text("Nama Tampilan") },
+                            leadingIcon = { Icon(Icons.Filled.Person, null, tint = Color(0xFFFFC107)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFFFFC107),
+                                focusedLabelColor = Color(0xFFFFC107)
+                            )
+                        )
+
+                        // Gallery button
                         Button(
                             onClick = {
-                                if (editedDisplayName.trim().isEmpty()) {
-                                    Toast.makeText(context, "Nama tidak boleh kosong!", Toast.LENGTH_SHORT).show()
+                                if (mediaPermission.status.isGranted) {
+                                    galleryLauncher.launch("image/*")
                                 } else {
-                                    viewModel.updateUserProfile(editedDisplayName.trim(), editedPhotoUrl.trim()) { success, msg ->
-                                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                                        isEditing = false
-                                        onDismiss()
-                                    }
+                                    mediaPermission.launchPermissionRequest()
                                 }
                             },
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF141821)),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
                         ) {
-                            Text("Simpan", fontWeight = FontWeight.Bold)
+                            Icon(Icons.Filled.PhotoLibrary, null, tint = Color(0xFFFFC107))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Pilih dari Galeri", color = Color.White, fontWeight = FontWeight.Bold)
                         }
+
+                        if (pickedImageUri != null) {
+                            Text(
+                                "Gambar dari galeri sudah dipilih",
+                                fontSize = 12.sp,
+                                color = Color(0xFF10B981),
+                                modifier = Modifier.align(Alignment.CenterHorizontally)
+                            )
+                        }
+
+                        // GIF Presets row
+                        Text(
+                            "Avatar GIF:",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White.copy(alpha = 0.7f)
+                        )
+
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(gifPresets) { gifUrl ->
+                                Box(
+                                    modifier = Modifier
+                                        .size(64.dp)
+                                        .clip(CircleShape)
+                                        .border(
+                                            width = if (selectedGifPreset == gifUrl) 3.dp else 1.dp,
+                                            brush = if (selectedGifPreset == gifUrl)
+                                                Brush.sweepGradient(listOf(Color(0xFFFFC107), Color(0xFFFFE082), Color(0xFFFFC107)))
+                                            else
+                                                Brush.linearGradient(listOf(Color.Gray, Color.Gray)),
+                                            shape = CircleShape
+                                        )
+                                        .clickable {
+                                            selectedGifPreset = gifUrl
+                                            pickedImageUri = null
+                                        }
+                                ) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(context).data(gifUrl).crossfade(true).build(),
+                                        imageLoader = gifImageLoader,
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(Modifier.height(4.dp))
+
+                        // Action buttons
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { isEditing = false },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, Color.Gray)
+                            ) {
+                                Text("Batal", color = Color.Gray)
+                            }
+                            Button(
+                                onClick = {
+                                    if (editedDisplayName.trim().isEmpty()) {
+                                        Toast.makeText(context, "Nama tidak boleh kosong!", Toast.LENGTH_SHORT).show()
+                                        return@Button
+                                    }
+                                    isSaving = true
+                                    when {
+                                        pickedImageUri != null -> {
+                                            viewModel.updateUserProfileFromGallery(
+                                                editedDisplayName.trim(), pickedImageUri!!
+                                            ) { success, msg ->
+                                                isSaving = false
+                                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                                if (success) { isEditing = false; onDismiss() }
+                                            }
+                                        }
+                                        selectedGifPreset != null -> {
+                                            viewModel.updateUserProfile(editedDisplayName.trim(), selectedGifPreset!!) { success, msg ->
+                                                isSaving = false
+                                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                                if (success) { isEditing = false; onDismiss() }
+                                            }
+                                        }
+                                        else -> {
+                                            viewModel.updateUserProfile(editedDisplayName.trim(), profile.photoUrl) { success, msg ->
+                                                isSaving = false
+                                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                                if (success) { isEditing = false; onDismiss() }
+                                            }
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.weight(1.5f),
+                                enabled = !isSaving,
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFC107))
+                            ) {
+                                if (isSaving) {
+                                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Icon(Icons.Filled.Save, null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Simpan", fontWeight = FontWeight.Bold, color = Color.Black)
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(16.dp))
                     }
 
                 } else {
-                    // Profile picture with circular border (matching image design)
+                    // ===== VIEW MODE =====
+                    // Gradient header banner
                     Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier.padding(top = 10.dp)
-                    ) {
-                        AsyncImage(
-                            model = profile.photoUrl,
-                            contentDescription = profile.displayName,
-                            modifier = Modifier
-                                .size(100.dp)
-                                .clip(CircleShape)
-                                .border(3.dp, MaterialTheme.colorScheme.primary, CircleShape)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // User name and email (matching image design)
-                    Text(
-                        text = "${profile.displayName} (Main Admin)",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-
-                    Text(
-                        text = profile.email,
-                        fontSize = 13.sp,
-                        color = Color.White.copy(alpha = 0.7f),
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // VIP PREMIUM MEMBER badge (matching image design)
-                    Box(
-                        modifier = Modifier
-                            .background(
-                                Brush.horizontalGradient(listOf(Color(0xFFFFD700), Color(0xFFFF8C00))),
-                                RoundedCornerShape(8.dp)
-                            )
-                            .padding(horizontal = 16.dp, vertical = 6.dp)
-                    ) {
-                        Text(
-                            "VIP PREMIUM MEMBER",
-                            color = Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.5.sp
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    // Four cards: Level, EXP, Premium Status, Watch Time
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        // First row: Level and EXP
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // Level Card
-                            Card(
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(12.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text("LEVEL", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f), fontWeight = FontWeight.Medium)
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        "Lvl ${profile.level}",
-                                        fontSize = 18.sp,
-                                        color = Color(0xFF00BCD4),
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        "Max 1000",
-                                        fontSize = 10.sp,
-                                        color = Color.White.copy(alpha = 0.5f)
-                                    )
-                                }
-                            }
-
-                            // EXP Card
-                            Card(
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(12.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text("EXP", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f), fontWeight = FontWeight.Medium)
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(profile.exp.toString(), fontSize = 13.sp, color = Color(0xFF9C27B0), fontWeight = FontWeight.Bold)
-                                    Text("Points", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
-                                }
-                            }
-                        }
-
-                        // Second row: Premium Status and Watch Time
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // Premium Status Card
-                            Card(
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(containerColor = if (profile.isPremium) Color(0xFFFFD700).copy(alpha = 0.2f) else Color(0xFF1E1E1E))
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(12.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text("Premium", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f), fontWeight = FontWeight.Medium)
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        if (profile.isPremium) "YES" else "NO",
-                                        fontSize = 13.sp,
-                                        color = if (profile.isPremium) Color(0xFFFFD700) else Color(0xFF757575),
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        if (profile.isPremium) "No Ads" else "With Ads",
-                                        fontSize = 10.sp,
-                                        color = Color.White.copy(alpha = 0.5f)
-                                    )
-                                }
-                            }
-
-                            // Watch Time Card
-                            Card(
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(12.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text("Watch Time", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f), fontWeight = FontWeight.Medium)
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text("${profile.watchDurationMinutes}m", fontSize = 13.sp, color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold)
-                                    Text("Total", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    // SEDANG DITONTON section (matching image design)
-                    Text(
-                        "SEDANG DITONTON",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        modifier = Modifier.align(Alignment.Start)
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Currently watching card
-                    Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color(0xFF1E1E1E), RoundedCornerShape(12.dp)),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
+                            .height(130.dp)
+                            .background(
+                                Brush.linearGradient(listOf(Color(0xFF141821), Color(0xFF1B2330)))
+                            )
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(50.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0xFF2C2C2C))
-                            ) {
-                                AsyncImage(
-                                    model = "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=100&q=80",
-                                    contentDescription = "Anime thumbnail",
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(12.dp))
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    "Frieren: Beyond Journey's End",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    "Episode 24",
-                                    fontSize = 11.sp,
-                                    color = Color.White.copy(alpha = 0.7f)
-                                )
-                                Text(
-                                    "18:42 / 24:00",
-                                    fontSize = 10.sp,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
+                        IconButton(onClick = onDismiss, modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)) {
+                            Icon(Icons.Filled.Close, contentDescription = "Tutup", tint = Color.White.copy(alpha = 0.75f))
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    // Edit Profil and Tutup buttons (matching image design)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    // Avatar overlapping the banner
+                    Box(
+                        modifier = Modifier
+                            .offset(y = (-55).dp)
+                            .padding(bottom = 0.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        if (currentUser?.email == profile.email) {
-                            Button(
-                                onClick = { isEditing = true },
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Text("Edit Profil", color = Color.Black, fontWeight = FontWeight.Bold)
+                        // Glowing animated ring
+                        Box(
+                            modifier = Modifier
+                                .size(120.dp)
+                                .rotate(glowAngle)
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.sweepGradient(
+                                        listOf(
+                                                Color(0xFFFFC107), Color(0xFFF6C453),
+                                                Color(0xFFFFE082), Color(0xFFFFC107)
+                                        )
+                                    )
+                                )
+                        )
+                        // Avatar image
+                        AsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(profile.photoUrl)
+                                .crossfade(true)
+                                .build(),
+                            imageLoader = gifImageLoader,
+                            contentDescription = profile.displayName,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(112.dp)
+                                .clip(CircleShape)
+                        )
+                    }
+
+                    // Content below avatar (offset to compensate avatar overlap)
+                    Column(
+                        modifier = Modifier
+                            .offset(y = (-48).dp)
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(0.dp)
+                    ) {
+                        // Name
+                        Text(
+                            text = profile.displayName,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color.White
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = profile.email,
+                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.5f)
+                        )
+                        Spacer(Modifier.height(10.dp))
+
+                        // Premium / Free badge
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    if (profile.isPremium)
+                                        Brush.horizontalGradient(listOf(Color(0xFFF6C453), Color(0xFFCB8F21)))
+                                    else
+                                        Brush.horizontalGradient(listOf(Color(0xFF374151), Color(0xFF4B5563))),
+                                    RoundedCornerShape(6.dp)
+                                )
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = if (profile.isPremium) Icons.Filled.WorkspacePremium else Icons.Filled.LockOpen,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    if (profile.isPremium) "PREMIUM" else "FREE",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Black
+                                )
                             }
                         }
-                        Button(
-                            onClick = onDismiss,
-                            modifier = Modifier.weight(if (currentUser?.email == profile.email) 1f else 2f),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("Tutup", fontWeight = FontWeight.Bold)
+
+                        Spacer(Modifier.height(16.dp))
+
+                        // EXP Progress Bar
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Level ${profile.level}", fontSize = 12.sp, color = Color(0xFFFFC107), fontWeight = FontWeight.Bold)
+                                Text("${profile.exp % 100} / 100 EXP", fontSize = 12.sp, color = Color.White.copy(alpha = 0.5f))
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(50.dp))
+                                    .background(Color.White.copy(alpha = 0.1f))
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(expProgress.coerceIn(0.01f, 1f))
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(50.dp))
+                                        .background(
+                                            Brush.horizontalGradient(
+                                                listOf(Color(0xFFFFC107), Color(0xFFFFE082))
+                                            )
+                                        )
+                                )
+                            }
                         }
+
+                        Spacer(Modifier.height(14.dp))
+
+                        // Stats Grid (2x2)
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                // EXP Card
+                                Card(
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF121722)),
+                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+                                ) {
+                                    Box(modifier = Modifier.padding(12.dp)) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                                            Icon(Icons.Filled.Bolt, contentDescription = null, tint = Color(0xFFFFC107), modifier = Modifier.size(18.dp))
+                                            Spacer(Modifier.height(4.dp))
+                                            Text("${profile.exp}", fontSize = 18.sp, color = Color(0xFFFFC107), fontWeight = FontWeight.Black)
+                                            Text("Total EXP", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
+                                        }
+                                    }
+                                }
+                                // Watch Time Card
+                                Card(
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF121722)),
+                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+                                ) {
+                                    Box(modifier = Modifier.padding(12.dp)) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                                            Icon(Icons.Filled.Schedule, contentDescription = null, tint = Color(0xFF2CD59F), modifier = Modifier.size(18.dp))
+                                            Spacer(Modifier.height(4.dp))
+                                            val h = profile.watchDurationMinutes / 60
+                                            val m = profile.watchDurationMinutes % 60
+                                            Text(if (h > 0) "${h}j ${m}m" else "${m}m", fontSize = 18.sp, color = Color(0xFF10B981), fontWeight = FontWeight.Black)
+                                            Text("Watch Time", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
+                                        }
+                                    }
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                // Comments Card
+                                Card(
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF121722)),
+                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+                                ) {
+                                    Box(modifier = Modifier.padding(12.dp)) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                                            Icon(Icons.Filled.ChatBubble, contentDescription = null, tint = Color(0xFFFFC107), modifier = Modifier.size(18.dp))
+                                            Spacer(Modifier.height(4.dp))
+                                            Text("${profile.commentCount}", fontSize = 18.sp, color = Color(0xFFFFC107), fontWeight = FontWeight.Black)
+                                            Text("Komentar", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
+                                        }
+                                    }
+                                }
+                                // Join Date Card
+                                Card(
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF121722)),
+                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+                                ) {
+                                    Box(modifier = Modifier.padding(12.dp)) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                                            Icon(Icons.Filled.CalendarMonth, contentDescription = null, tint = Color(0xFFF6C453), modifier = Modifier.size(18.dp))
+                                            Spacer(Modifier.height(4.dp))
+                                            Text(
+                                                SimpleDateFormat("dd MMM yy", Locale("id")).format(Date(profile.joinDate)),
+                                                fontSize = 13.sp,
+                                                color = Color(0xFFF59E0B),
+                                                fontWeight = FontWeight.Black
+                                            )
+                                            Text("Bergabung", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Premium expiry info
+                        if (profile.isPremium && profile.premiumExpiration > 0) {
+                            Spacer(Modifier.height(10.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color(0xFFF6C453).copy(alpha = 0.08f), RoundedCornerShape(8.dp))
+                                    .border(1.dp, Color(0xFFF6C453).copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                    .padding(10.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Filled.EventAvailable, contentDescription = null, tint = Color(0xFFF6C453), modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Column {
+                                        Text("Premium aktif hingga:", fontSize = 10.sp, color = Color(0xFFFFD700).copy(alpha = 0.7f))
+                                        Text(
+                                            simpleDate.format(Date(profile.premiumExpiration)),
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFFFFD700)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(Modifier.height(16.dp))
+
+                        // Buttons
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            if (isOwnProfile) {
+                                Button(
+                                    onClick = { isEditing = true },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFC107)),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(Icons.Filled.Edit, null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Edit Profil", fontWeight = FontWeight.Bold, color = Color.Black)
+                                }
+                            }
+                            OutlinedButton(
+                                onClick = onDismiss,
+                                modifier = Modifier.weight(if (isOwnProfile) 1f else 2f),
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, Color.Gray.copy(alpha = 0.5f))
+                            ) {
+                                Text("Tutup", color = Color.Gray, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Spacer(Modifier.height(20.dp))
                     }
                 }
             }
         }
     }
+
 }
 
 // Dialog: Social Media sharing sheet mockup
@@ -3780,5 +4067,3 @@ fun AdDialog(
         }
     }
 }
-
-

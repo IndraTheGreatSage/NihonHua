@@ -92,6 +92,8 @@ dependencies {
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
   implementation(libs.coil.compose)
+  implementation("io.coil-kt:coil-gif:2.7.0") // GIF support for profile pictures
+  implementation("com.google.accompanist:accompanist-permissions:0.37.0") // Gallery permissions
   implementation("org.jsoup:jsoup:1.18.1")
   implementation(libs.converter.moshi)
   implementation(libs.firebase.ai)
@@ -105,6 +107,8 @@ dependencies {
   // Firebase Auth
   implementation("com.google.firebase:firebase-auth-ktx:23.1.0")
   implementation("com.google.android.gms:play-services-auth:21.1.0")
+  implementation("com.google.android.gms:play-services-ads:23.0.0")
+  implementation("com.google.android.gms:play-services-ads-identifier:17.0.0")
   implementation("com.google.firebase:firebase-firestore-ktx:25.1.1")
   // QR Code Generation
   implementation("com.google.zxing:core:3.5.3")
@@ -128,3 +132,5 @@ dependencies {
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
 }
+
+// cleanBuildFolder task removed

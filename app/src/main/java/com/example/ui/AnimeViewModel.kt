@@ -1,11 +1,16 @@
 package com.example.ui
 
 import android.app.Application
+import android.content.Context
+import android.net.Uri
+import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class AnimeViewModel(application: Application) : AndroidViewModel(application) {
     private val repo = AnimeRepository.getInstance(application)
@@ -23,6 +28,9 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _selectedEpisode = MutableStateFlow<Episode?>(null)
     val selectedEpisode: StateFlow<Episode?> = _selectedEpisode.asStateFlow()
+
+    private val _isResolvingEpisode = MutableStateFlow(false)
+    val isResolvingEpisode: StateFlow<Boolean> = _isResolvingEpisode.asStateFlow()
 
     private val _selectedQuality = MutableStateFlow("1080p")
     val selectedQuality: StateFlow<String> = _selectedQuality.asStateFlow()
@@ -45,6 +53,9 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
             if (user != null) repo.getWatchHistory(user.email) else flowOf(emptyList())
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+
+
 
     val downloads: StateFlow<List<OfflineDownload>> = repo.getDownloads()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -97,6 +108,10 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
     fun onAdWatched() {
         _shouldShowAd.value = false
         lastAdTime = System.currentTimeMillis()
+        val user = currentUser.value ?: return
+        viewModelScope.launch {
+            repo.addWatchMinutesAndSave(user.email, 60L)
+        }
     }
 
     fun dismissAd() {
@@ -122,8 +137,7 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
                     val scraped = AnichinScraper.getLatestShows()
                     _shows.value = scraped
                 } catch (e2: Exception) {
-                    // Final fallback to local data
-                    _shows.value = AnichinScraper.LOCAL_ANIMES
+                    _shows.value = emptyList()
                 }
             } finally {
                 _isLoading.value = false
@@ -133,7 +147,26 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectAnime(anime: AnimeVideo) {
         _selectedAnime.value = anime
-        _selectedEpisode.value = anime.episodes.firstOrNull()
+        anime.episodes.firstOrNull()?.let { selectEpisode(it) } ?: run {
+            _selectedEpisode.value = null
+        }
+        if (anime.episodes.isEmpty()) {
+            viewModelScope.launch {
+                _isLoading.value = true
+                try {
+                    val detail = ApiService.fetchAnimeDetail(anime.id)
+                    if (detail != null) {
+                        _selectedAnime.value = detail
+                        detail.episodes.firstOrNull()?.let { selectEpisode(it) } ?: run {
+                            _selectedEpisode.value = null
+                        }
+                        _shows.value = _shows.value.map { if (it.id == detail.id) detail else it }
+                    }
+                } finally {
+                    _isLoading.value = false
+                }
+            }
+        }
     }
 
     fun closeActiveWatchScreen() {
@@ -143,6 +176,19 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectEpisode(episode: Episode) {
         _selectedEpisode.value = episode
+        if (episode.videoUrl.startsWith("http", ignoreCase = true)) {
+            viewModelScope.launch {
+                _isResolvingEpisode.value = true
+                try {
+                    val resolvedUrl = ApiService.resolveEpisodeVideoUrl(episode.videoUrl)
+                    if (resolvedUrl.isNotBlank() && resolvedUrl != episode.videoUrl) {
+                        _selectedEpisode.value = episode.copy(videoUrl = resolvedUrl)
+                    }
+                } finally {
+                    _isResolvingEpisode.value = false
+                }
+            }
+        }
     }
 
     fun changeQuality(quality: String) {
@@ -220,8 +266,8 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun handleLogout() {
-        repo.logout()
+    fun handleLogout(context: android.content.Context) {
+        repo.logout(context)
     }
 
     fun saveProgress(
@@ -291,6 +337,35 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
             val updated = user.copy(displayName = displayName, photoUrl = photoUrl)
             repo.updateProfile(updated)
             onResult(true, "Profil berhasil diperbarui!")
+        }
+    }
+
+    /**
+     * Mengambil gambar dari URI galeri, mengkonversinya ke Base64,
+     * lalu menyimpannya ke profil user sebagai data URI (mendukung GIF!).
+     */
+    fun updateUserProfileFromGallery(displayName: String, imageUri: Uri, onResult: (Boolean, String) -> Unit) {
+        val user = currentUser.value ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val context = getApplication<Application>().applicationContext
+                val contentResolver = context.contentResolver
+                val mimeType = contentResolver.getType(imageUri) ?: "image/jpeg"
+                val inputStream = contentResolver.openInputStream(imageUri)
+                val bytes = inputStream?.readBytes()
+                inputStream?.close()
+                if (bytes == null || bytes.isEmpty()) {
+                    withContext(Dispatchers.Main) { onResult(false, "Gagal membaca gambar!") }
+                    return@launch
+                }
+                val base64 = Base64.encodeToString(bytes, Base64.DEFAULT)
+                val dataUri = "data:$mimeType;base64,$base64"
+                val updated = user.copy(displayName = displayName, photoUrl = dataUri)
+                repo.updateProfile(updated)
+                withContext(Dispatchers.Main) { onResult(true, "Foto profil berhasil diperbarui!") }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { onResult(false, "Error: ${e.message}") }
+            }
         }
     }
 
@@ -369,7 +444,7 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun generateInitialNotifications() {
         _notifications.value = listOf(
-            AppNotification(1, "Rilis Episode Baru", "Battle Through The Heavens S5 Episode 101 telah rilis! Nonton sekarang dengan grafis 4K.", System.currentTimeMillis() - 3600000),
+            AppNotification(1, "Rilis Episode Baru", "Episode terbaru dari sumber utama sudah masuk. Cek daftar rilis hari ini.", System.currentTimeMillis() - 3600000),
             AppNotification(2, "Rilis Episode Baru", "Renegade Immortal Episode 38 sudah tayang. Ikuti perjalanan kejam Wang Lin!", System.currentTimeMillis() - 7200000),
             AppNotification(3, "Komunitas Aktif", "Seseorang menyukai komentar Anda di Perfect World Episode 165.", System.currentTimeMillis() - 14400000)
         )

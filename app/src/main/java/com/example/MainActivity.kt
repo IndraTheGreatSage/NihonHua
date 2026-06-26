@@ -25,7 +25,7 @@ import com.google.firebase.auth.FirebaseAuth
 
 class MainActivity : ComponentActivity() {
 
-    private lateinit var googleSignInClient: GoogleSignInClient
+    private var googleSignInClient: GoogleSignInClient? = null
     private lateinit var animeViewModel: AnimeViewModel
 
     // Launcher untuk menerima hasil Google Sign-In
@@ -51,15 +51,21 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        deleteSharedPreferences("crash_logs")
+
         enableEdgeToEdge()
 
-        // Konfigurasi Google Sign-In — ganti WEB_CLIENT_ID dengan client_id dari google-services.json
-        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestIdToken(getString(R.string.default_web_client_id)) // otomatis dari google-services.json
-            .requestEmail()
-            .build()
-
-        googleSignInClient = GoogleSignIn.getClient(this, gso)
+        // Setup Google Sign-In safely
+        try {
+            val clientId = getString(resources.getIdentifier("default_web_client_id", "string", packageName))
+            val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                .requestIdToken(clientId)
+                .requestEmail()
+                .build()
+            googleSignInClient = GoogleSignIn.getClient(this, gso)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Google Sign-In tidak tersedia: ${e.message}", Toast.LENGTH_LONG).show()
+        }
 
         setContent {
             animeViewModel = viewModel()
@@ -80,7 +86,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun launchGoogleSignIn() {
-        val signInIntent = googleSignInClient.signInIntent
+        val client = googleSignInClient
+        if (client == null) {
+            Toast.makeText(this, "Google Sign-In belum siap. Coba lagi.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val signInIntent = client.signInIntent
         googleSignInLauncher.launch(signInIntent)
     }
 }
