@@ -12,7 +12,7 @@ import androidx.room.RoomDatabase
         WatchHistory::class,
         OfflineDownload::class,
         PremiumGiftCode::class,
-        BlockedUser::class
+        BlockedUser::class,
     ],
     version = 3,
     exportSchema = false
@@ -36,7 +36,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "anidong_database"
                 )
-                .fallbackToDestructiveMigration()
+                .fallbackToDestructiveMigration(true)
                 .build()
                 INSTANCE = instance
                 instance

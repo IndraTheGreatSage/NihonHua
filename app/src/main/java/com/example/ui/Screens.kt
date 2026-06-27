@@ -33,7 +33,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -673,6 +672,11 @@ fun DashboardScreen(viewModel: AnimeViewModel) {
             CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
         }
     } else {
+        val filteredShows = remember(shows, selectedFilter) {
+            shows.filter {
+                selectedFilter == "Semua" || it.type.equals(selectedFilter, ignoreCase = true)
+            }
+        }
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 16.dp)
@@ -902,10 +906,6 @@ fun DashboardScreen(viewModel: AnimeViewModel) {
                 }
             }
 
-            val filteredShows = shows.filter {
-                selectedFilter == "Semua" || it.type.equals(selectedFilter, ignoreCase = true)
-            }
-
             // Sedang Populer (Currently Popular) - matching image design
             item {
                 Column(modifier = Modifier.padding(vertical = 12.dp)) {
@@ -921,7 +921,10 @@ fun DashboardScreen(viewModel: AnimeViewModel) {
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        items(filteredShows.sortedByDescending { it.rating }.take(6)) { anime ->
+                        items(
+                            items = filteredShows.sortedByDescending { it.rating }.take(6),
+                            key = { it.id }
+                        ) { anime ->
                             Card(
                                 modifier = Modifier
                                     .width(150.dp)
@@ -1013,7 +1016,7 @@ fun DashboardScreen(viewModel: AnimeViewModel) {
                 )
             }
 
-            items(filteredShows.take(5)) { anime ->
+            items(items = filteredShows.take(5), key = { it.id }) { anime ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1092,12 +1095,14 @@ fun AdvancedSearchScreen(viewModel: AnimeViewModel) {
     val types = listOf("Semua Tipe", "Anime", "Donghua")
     val years = listOf("Semua Tahun", "2026", "2025", "2024", "2023", "2022", "2021", "2020")
 
-    val filteredResults = shows.filter { anime ->
-        val matchesQuery = searchQuery.isEmpty() || anime.title.contains(searchQuery, ignoreCase = true) || anime.description.contains(searchQuery, ignoreCase = true)
-        val matchesGenre = selectedGenre.isEmpty() || selectedGenre == "Semua Genre" || anime.genres.any { it.equals(selectedGenre, ignoreCase = true) }
-        val matchesType = selectedType.isEmpty() || selectedType == "Semua Tipe" || anime.type.equals(selectedType, ignoreCase = true)
-        val matchesYear = selectedYear.isEmpty() || selectedYear == "Semua Tahun" || anime.releaseYear == selectedYear
-        matchesQuery && matchesGenre && matchesType && matchesYear
+    val filteredResults = remember(shows, searchQuery, selectedGenre, selectedType, selectedYear) {
+        shows.filter { anime ->
+            val matchesQuery = searchQuery.isEmpty() || anime.title.contains(searchQuery, ignoreCase = true) || anime.description.contains(searchQuery, ignoreCase = true)
+            val matchesGenre = selectedGenre.isEmpty() || selectedGenre == "Semua Genre" || anime.genres.any { it.equals(selectedGenre, ignoreCase = true) }
+            val matchesType = selectedType.isEmpty() || selectedType == "Semua Tipe" || anime.type.equals(selectedType, ignoreCase = true)
+            val matchesYear = selectedYear.isEmpty() || selectedYear == "Semua Tahun" || anime.releaseYear == selectedYear
+            matchesQuery && matchesGenre && matchesType && matchesYear
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -1256,7 +1261,7 @@ fun AdvancedSearchScreen(viewModel: AnimeViewModel) {
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(filteredResults) { anime ->
+                items(items = filteredResults, key = { it.id }) { anime ->
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1339,32 +1344,6 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
     var blockReasonInput by remember { mutableStateOf("") }
 
     var isWatching by remember { mutableStateOf(false) }
-    var progressSeconds by remember { mutableStateOf(45L) }
-    val totalSeconds = 1440L // 24 minutes
-
-    // Save watch history periodically
-    LaunchedEffect(selectedEp, progressSeconds) {
-        selectedEp?.let { episode ->
-            viewModel.saveProgress(
-                animeId = anime!!.id,
-                animeTitle = anime!!.title,
-                animeImage = anime!!.imageUrl,
-                episodeNumber = episode.episodeNumber,
-                progressPercent = progressSeconds.toFloat() / totalSeconds.toFloat(),
-                progressSeconds = progressSeconds,
-                totalSeconds = totalSeconds
-            )
-        }
-    }
-
-    LaunchedEffect(isWatching, selectedEp) {
-        while (isWatching && selectedEp != null) {
-            kotlinx.coroutines.delay(1000)
-            if (progressSeconds < totalSeconds) {
-                progressSeconds++
-            }
-        }
-    }
 
     Surface(
         modifier = Modifier
@@ -1717,19 +1696,65 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                         }
                     }
 
-                    if (selectedEp != null && !isResolvingEpisode) {
-                        EpisodeWebPlayer(
-                            url = selectedEp!!.videoUrl,
+                    if (selectedEp != null) {
+                        // Quality selector state
+                        var showResolutionMenu by remember { mutableStateOf(false) }
+
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(240.dp)
-                                .background(Color.Black)
-                        )
+                                .height(220.dp)
+                        ) {
+                            // WebView utama — load episode URL, auto-block iklan, auto-inject CSS
+                            EpisodeWebView(
+                                videoUrl = selectedEp!!.videoUrl,
+                                modifier = Modifier.fillMaxSize()
+                            )
+
+                            // Badge kualitas (overlay di atas WebView)
+                            Row(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color.Red.copy(alpha = 0.85f), RoundedCornerShape(4.dp))
+                                        .clickable { showResolutionMenu = true }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = if (quality == "4K") "4K ULTRA HD" else quality.uppercase(),
+                                        color = Color.White,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+
+                                // Dropdown pilih resolusi
+                                DropdownMenu(
+                                    expanded = showResolutionMenu,
+                                    onDismissRequest = { showResolutionMenu = false }
+                                ) {
+                                    listOf("360p", "480p", "720p", "1080p", "4K").forEach { q ->
+                                        DropdownMenuItem(
+                                            text = { Text(if (q == "4K") "4K (Ultra HD)" else q) },
+                                            onClick = {
+                                                viewModel.changeQuality(q)
+                                                showResolutionMenu = false
+                                                Toast.makeText(context, "Grafik dialihkan ke $q", Toast.LENGTH_SHORT).show()
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     } else {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(240.dp)
+                                .height(220.dp)
                                 .background(Color.Black),
                             contentAlignment = Alignment.Center
                         ) {
@@ -1777,31 +1802,6 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
-                        }
-                        var showResolutionMenu by remember { mutableStateOf(false) }
-                        Box {
-                            Text(
-                                "$quality ▼",
-                                color = Color.Black,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Black,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(gold)
-                                    .clickable { showResolutionMenu = true }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                            )
-                            DropdownMenu(expanded = showResolutionMenu, onDismissRequest = { showResolutionMenu = false }) {
-                                listOf("360p", "480p", "720p", "1080p", "4K").forEach { q ->
-                                    DropdownMenuItem(
-                                        text = { Text(if (q == "4K") "4K (Ultra HD)" else q) },
-                                        onClick = {
-                                            viewModel.changeQuality(q)
-                                            showResolutionMenu = false
-                                        }
-                                    )
-                                }
-                            }
                         }
                     }
 
@@ -1917,7 +1917,7 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                                 contentPadding = PaddingValues(horizontal = 16.dp),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                items(episodes) { ep ->
+                                items(items = episodes, key = { it.id }) { ep ->
                                     val isSelected = selectedEp!!.id == ep.id
                                     Box(
                                         modifier = Modifier
@@ -1928,7 +1928,6 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                                             .border(1.dp, if (isSelected) gold else Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
                                             .clickable {
                                                 viewModel.selectEpisode(ep)
-                                                progressSeconds = 0L // Reset progress on ep switch
                                             }
                                             .padding(horizontal = 16.dp, vertical = 12.dp)
                                     ) {
@@ -1945,7 +1944,7 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
 
                     // Comments Section Title
                     item {
-                        Divider(modifier = Modifier.padding(vertical = 8.dp))
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                         Text(
                             "Diskusi Komunitas (${comments.size})",
                             fontWeight = FontWeight.Bold,
@@ -2002,7 +2001,7 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                             }
                         }
                     } else {
-                        items(comments) { comment ->
+                        items(items = comments, key = { it.id }) { comment ->
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -2292,7 +2291,7 @@ fun DownloadsScreen(viewModel: AnimeViewModel) {
             }
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(downloads) { dl ->
+                items(items = downloads, key = { it.id }) { dl ->
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -2354,224 +2353,760 @@ fun DownloadsScreen(viewModel: AnimeViewModel) {
     }
 }
 
-// 6. SETTINGS & PREMIUM CHANNELS (Premium tiers + claiming codes)
+// ─── Cinematic Pulse color tokens ─────────────────────────────────────
+private val CP_BG           = Color(0xFF0B1326)
+private val CP_SURFACE      = Color(0xFF171F33)
+private val CP_SURFACE_HIGH = Color(0xFF222A3D)
+private val CP_SURFACE_HIGHEST = Color(0xFF2D3449)
+private val CP_VIOLET       = Color(0xFFD2BBFF)
+private val CP_VIOLET_DIM   = Color(0xFF7C3AED)
+private val CP_CYAN         = Color(0xFF4CD6FF)
+private val CP_CRIMSON      = Color(0xFFFFB2BA)
+private val CP_TEXT         = Color(0xFFDAE2FD)
+private val CP_TEXT_DIM     = Color(0xFFCCC3D8)
+private val CP_OUTLINE      = Color(0xFF4A4455)
+private val CP_GLASS        = Color(0x0DFFFFFF)
+private val CP_GLASS_BORDER = Color(0x1AFFFFFF)
+private val CP_ERROR        = Color(0xFFFFB4AB)
+
+// ─── Helpers ───────────────────────────────────────────────────────────
+private fun Modifier.glassPanel(radius: Float = 16f) = this
+    .background(CP_GLASS, RoundedCornerShape(radius.dp))
+    .border(1.dp, CP_GLASS_BORDER, RoundedCornerShape(radius.dp))
+
+// ─── Cinematic Pulse Settings Screen ───────────────────────────────────
 @Composable
 fun SettingsScreen(viewModel: AnimeViewModel) {
     val currentUser by viewModel.currentUser.collectAsState()
-    val isDarkMode by viewModel.isDarkMode.collectAsState()
-    val context = LocalContext.current
-    var inputCode by remember { mutableStateOf("") }
-    var activePurchaseTier by remember { mutableStateOf<String?>(null) }
+    val isDarkMode  by viewModel.isDarkMode.collectAsState()
+    val context     = LocalContext.current
+
+    var inputCode          by remember { mutableStateOf("") }
+    var activePurchaseTier  by remember { mutableStateOf<String?>(null) }
     var activePurchasePrice by remember { mutableStateOf("") }
     var activePurchaseTitle by remember { mutableStateOf("") }
+    var selectedPlan        by remember { mutableStateOf("YEARLY") }
 
-    fun openPurchase(tier: String, title: String, price: String) {
-        activePurchaseTier = tier
-        activePurchaseTitle = title
-        activePurchasePrice = price
-    }
-
-    LazyColumn(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0B0D12)),
-        contentPadding = PaddingValues(18.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .background(CP_BG)
     ) {
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Settings", fontSize = 26.sp, fontWeight = FontWeight.Black, color = Color.White)
-                Text("Akun, premium, dan preferensi aplikasi.", fontSize = 12.sp, color = Color.White.copy(alpha = 0.56f))
-            }
-        }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
 
-        currentUser?.let { user ->
             item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xFF141821), RoundedCornerShape(8.dp))
-                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
-                        .padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    AsyncImage(
-                        model = user.photoUrl,
-                        contentDescription = "Avatar",
-                        modifier = Modifier
-                            .size(52.dp)
-                            .clip(CircleShape)
-                            .border(1.5.dp, if (user.isPremium) Color(0xFFF6C453) else Color.White.copy(alpha = 0.22f), CircleShape),
-                        contentScale = ContentScale.Crop
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(user.displayName, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(user.email, fontSize = 11.sp, color = Color.White.copy(alpha = 0.55f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    Surface(
-                        color = if (user.isPremium) Color(0xFFF6C453) else Color(0xFF2A3140),
-                        shape = RoundedCornerShape(6.dp)
-                    ) {
-                        Text(
-                            if (user.isPremium) "PREMIUM" else "FREE",
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Black,
-                            color = if (user.isPremium) Color(0xFF171000) else Color.White
-                        )
-                    }
+                if (currentUser != null) {
+                    CpProfileCard(currentUser!!)
                 }
             }
-        }
 
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF11151D), RoundedCornerShape(8.dp))
-                    .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(8.dp))
-                    .padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Outlined.DarkMode, contentDescription = null, tint = Color(0xFFFFC107))
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Tema gelap", fontWeight = FontWeight.Bold, color = Color.White)
-                    Text("Mode visual utama aplikasi", fontSize = 11.sp, color = Color.White.copy(alpha = 0.5f))
-                }
-                Switch(
-                    checked = isDarkMode,
-                    onCheckedChange = { viewModel.toggleDarkMode() },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = Color(0xFFFFC107)
-                    )
+            item {
+                CpPremiumSection(
+                    currentUser    = currentUser,
+                    selectedPlan   = selectedPlan,
+                    onSelectPlan   = { selectedPlan = it },
+                    onPurchase     = { tier, title, price ->
+                        activePurchaseTier  = tier
+                        activePurchaseTitle = title
+                        activePurchasePrice = price
+                    }
                 )
             }
-        }
 
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.WorkspacePremium, null, tint = Color(0xFFF6C453), modifier = Modifier.size(19.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Premium", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.White)
-                }
-                Text("Pilih durasi aktif, tanpa iklan, kualitas tinggi, dan fitur offline.", fontSize = 12.sp, color = Color.White.copy(alpha = 0.56f))
-            }
-        }
-
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                PremiumCard(title = "Premium 1 Hari", price = "Rp 1.000", originalPrice = "", onPurchase = { openPurchase("1_DAY", "Premium 1 Hari", "Rp 1.000") })
-                PremiumCard(title = "Premium 5 Hari", price = "Rp 4.000", originalPrice = "", onPurchase = { openPurchase("5_DAYS", "Premium 5 Hari", "Rp 4.000") })
-                PremiumCard(title = "Premium 30 Hari", price = "Rp 20.000", originalPrice = "Rp 25.000", onPurchase = { openPurchase("30_DAYS", "Premium 30 Hari", "Rp 20.000") })
-                PremiumCard(title = "Premium 1 Tahun", price = "Rp 200.000", originalPrice = "Rp 240.000", onPurchase = { openPurchase("1_YEAR", "Premium 1 Tahun", "Rp 200.000") })
-            }
-        }
-
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF0E1A17), RoundedCornerShape(8.dp))
-                    .border(1.dp, Color(0xFF2CD59F).copy(alpha = 0.22f), RoundedCornerShape(8.dp))
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.CardGiftcard, null, tint = Color(0xFF2CD59F))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Klaim kode", fontWeight = FontWeight.Bold, color = Color.White)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = inputCode,
-                        onValueChange = { inputCode = it.uppercase() },
-                        placeholder = { Text("ADPREM1", fontSize = 12.sp) },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        shape = RoundedCornerShape(8.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFF2CD59F),
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.18f),
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        )
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Switch(
-                        checked = inputCode.isNotBlank(),
-                        onCheckedChange = {},
-                        enabled = false
-                    )
-                    Button(
-                        onClick = {
-                            if (inputCode.trim().isNotEmpty()) {
-                                viewModel.redeemGiftCode(inputCode.trim()) { msg -> Toast.makeText(context, msg, Toast.LENGTH_LONG).show() }
-                                inputCode = ""
+            item {
+                CpGiftCodeSection(
+                    inputCode  = inputCode,
+                    onCodeChange = { inputCode = it },
+                    onRedeem   = {
+                        if (inputCode.trim().isNotEmpty()) {
+                            viewModel.redeemGiftCode(inputCode.trim()) { msg ->
+                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                             }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2CD59F)),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.height(56.dp)
-                    ) {
-                        Text("Klaim", fontWeight = FontWeight.Bold, color = Color(0xFF06110E))
+                            inputCode = ""
+                        }
                     }
-                }
+                )
             }
-        }
 
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF171217), RoundedCornerShape(8.dp))
-                    .border(1.dp, Color(0xFFF05D5E).copy(alpha = 0.22f), RoundedCornerShape(8.dp))
-                    .padding(14.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Gavel, null, tint = Color(0xFFF05D5E))
+            item {
+                CpSystemSettings(isDarkMode = isDarkMode, onToggleDark = { viewModel.toggleDarkMode() })
+            }
+
+            item {
+                CpCommunityRules()
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedButton(
+                    onClick = { viewModel.handleLogout() },
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                    border   = BorderStroke(1.dp, CP_ERROR.copy(alpha = 0.4f)),
+                    shape    = RoundedCornerShape(16.dp),
+                    colors   = ButtonDefaults.outlinedButtonColors(
+                        contentColor = CP_ERROR
+                    )
+                ) {
+                    Icon(Icons.Filled.Logout, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Aturan komunitas", fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("Keluar dari Akun", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    "1. Dilarang spoiler episode yang belum tayang.\n2. Tidak boleh komentar kasar, SARA, pornografi, atau toxic.\n3. Dilarang spam dan promosi link ilegal.",
-                    fontSize = 11.sp,
-                    lineHeight = 18.sp,
-                    color = Color.White.copy(alpha = 0.72f)
+                    "NihonHua v1.0 • Cinematic Pulse UI",
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                    fontSize  = 11.sp,
+                    color     = CP_TEXT_DIM.copy(alpha = 0.4f),
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.5.sp
                 )
             }
         }
 
-        item {
-            Button(
-                onClick = { viewModel.handleLogout(context) },
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, Color(0xFFF05D5E).copy(alpha = 0.34f), RoundedCornerShape(8.dp)),
-                shape = RoundedCornerShape(8.dp),
-                contentPadding = PaddingValues(16.dp)
-            ) {
-                Icon(Icons.Filled.Logout, contentDescription = "Logout", tint = Color(0xFFF05D5E))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Keluar dari Akun Google", fontWeight = FontWeight.Bold, color = Color(0xFFF05D5E))
-            }
-            Spacer(modifier = Modifier.height(40.dp))
+        if (activePurchaseTier != null) {
+            PremiumPaymentDialog(
+                tier      = activePurchaseTier!!,
+                title     = activePurchaseTitle,
+                price     = activePurchasePrice,
+                viewModel = viewModel,
+                onDismiss = { activePurchaseTier = null }
+            )
         }
     }
+}
 
-    if (activePurchaseTier != null) {
-        PremiumPaymentDialog(
-            tier = activePurchaseTier!!,
-            title = activePurchaseTitle,
-            price = activePurchasePrice,
-            viewModel = viewModel,
-            onDismiss = { activePurchaseTier = null }
+// ─── Profile Card ───────────────────────────────────────────────────────
+@Composable
+private fun CpProfileCard(user: com.example.data.UserProfile) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .glassPanel()
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box {
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .background(
+                        Brush.sweepGradient(listOf(CP_VIOLET, CP_CYAN, CP_VIOLET)),
+                        CircleShape
+                    )
+                    .padding(2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                AsyncImage(
+                    model = user.photoUrl,
+                    contentDescription = user.displayName,
+                    modifier = Modifier.size(68.dp).clip(CircleShape)
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .background(
+                        if (user.isPremium) CP_VIOLET else CP_CRIMSON,
+                        RoundedCornerShape(50)
+                    )
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    if (user.isPremium) "VIP" else "Free",
+                    color      = if (user.isPremium) Color(0xFF3F008E) else Color(0xFF67001F),
+                    fontSize   = 9.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 0.5.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(16.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(user.displayName, color = CP_TEXT, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Text(
+                maskEmail(user.email),
+                color    = CP_TEXT_DIM.copy(alpha = 0.6f),
+                fontSize = 12.sp,
+                letterSpacing = 0.2.sp
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "LEVEL ${user.level}",
+                    color      = CP_VIOLET,
+                    fontSize   = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 0.8.sp
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(5.dp)
+                        .background(CP_SURFACE_HIGHEST, RoundedCornerShape(50))
+                        .clip(RoundedCornerShape(50))
+                ) {
+                    val pct = ((user.exp % 100) / 100f).coerceIn(0f, 1f)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(pct)
+                            .background(
+                                Brush.horizontalGradient(listOf(CP_VIOLET_DIM, CP_VIOLET)),
+                                RoundedCornerShape(50)
+                            )
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ─── Premium Section ───────────────────────────────────────────────────
+@Composable
+private fun CpPremiumSection(
+    currentUser: com.example.data.UserProfile?,
+    selectedPlan: String,
+    onSelectPlan: (String) -> Unit,
+    onPurchase: (tier: String, title: String, price: String) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            CP_VIOLET_DIM.copy(alpha = 0.45f),
+                            CP_BG.copy(alpha = 0.6f)
+                        )
+                    )
+                )
+                .border(
+                    1.dp,
+                    Brush.horizontalGradient(listOf(CP_VIOLET.copy(alpha = 0.4f), Color.Transparent)),
+                    RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+                )
+                .padding(20.dp)
+        ) {
+            Icon(
+                Icons.Filled.WorkspacePremium,
+                contentDescription = null,
+                tint     = CP_VIOLET.copy(alpha = 0.07f),
+                modifier = Modifier
+                    .size(140.dp)
+                    .align(Alignment.TopEnd)
+                    .offset(x = 20.dp, y = (-10).dp)
+            )
+
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.AutoAwesome, contentDescription = null,
+                        tint = CP_VIOLET, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "UNLEASH THE DRAGON",
+                        color      = CP_VIOLET,
+                        fontWeight = FontWeight.Black,
+                        fontSize   = 17.sp,
+                        letterSpacing = 0.5.sp
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    "Saksikan Donghua & Anime terbaik\nseperti di bioskop. Tanpa iklan. 4K.",
+                    color    = CP_TEXT_DIM.copy(alpha = 0.8f),
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp))
+                .background(CP_SURFACE.copy(alpha = 0.5f))
+                .padding(horizontal = 14.dp, vertical = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            CpPlanCard(
+                modifier       = Modifier.weight(1f),
+                title          = "Monthly",
+                subtitle       = "Fleksibel",
+                price          = "Rp 20.000",
+                priceUnit      = "/bln",
+                features       = listOf("Tanpa Iklan", "4K Ultra HD", "1 Layar"),
+                isSelected     = selectedPlan == "MONTHLY",
+                isBestValue    = false,
+                onSelect       = { onSelectPlan("MONTHLY") },
+                onPurchase     = { onPurchase("30_DAYS", "Premium 30 Hari", "Rp 20.000") }
+            )
+            CpPlanCard(
+                modifier       = Modifier.weight(1f),
+                title          = "Yearly",
+                subtitle       = "Hemat 30%",
+                price          = "Rp 200.000",
+                priceUnit      = "/thn",
+                features       = listOf("Semua Fitur", "Early Access", "Unduh Offline"),
+                isSelected     = selectedPlan == "YEARLY",
+                isBestValue    = true,
+                onSelect       = { onSelectPlan("YEARLY") },
+                onPurchase     = { onPurchase("1_YEAR", "Premium 1 Tahun", "Rp 200.000") }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            CpMiniPlanCard(
+                modifier  = Modifier.weight(1f),
+                label     = "1 Hari",
+                price     = "Rp 1.000",
+                tier      = "1_DAY",
+                onPurchase = onPurchase
+            )
+            CpMiniPlanCard(
+                modifier  = Modifier.weight(1f),
+                label     = "5 Hari",
+                price     = "Rp 4.000",
+                tier      = "5_DAYS",
+                onPurchase = onPurchase
+            )
+        }
+    }
+}
+
+@Composable
+private fun CpPlanCard(
+    modifier: Modifier,
+    title: String,
+    subtitle: String,
+    price: String,
+    priceUnit: String,
+    features: List<String>,
+    isSelected: Boolean,
+    isBestValue: Boolean,
+    onSelect: () -> Unit,
+    onPurchase: () -> Unit
+) {
+    val borderBrush = if (isSelected)
+        Brush.linearGradient(listOf(CP_VIOLET, CP_CYAN))
+    else
+        Brush.linearGradient(listOf(CP_OUTLINE.copy(alpha = 0.3f), CP_OUTLINE.copy(alpha = 0.3f)))
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(18.dp))
+            .then(
+                if (isSelected)
+                    Modifier.background(
+                        Brush.linearGradient(
+                            listOf(CP_VIOLET_DIM.copy(alpha = 0.22f), CP_BG.copy(alpha = 0.5f))
+                        )
+                    )
+                else Modifier.background(CP_GLASS)
+            )
+            .border(
+                width = if (isSelected) 2.dp else 1.dp,
+                brush = borderBrush,
+                shape = RoundedCornerShape(18.dp)
+            )
+            .clickable { onSelect() }
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+
+            if (isBestValue) {
+                Box(
+                    modifier = Modifier
+                        .background(CP_VIOLET, RoundedCornerShape(6.dp))
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        "BEST VALUE",
+                        color      = Color(0xFF3F008E),
+                        fontSize   = 9.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 0.8.sp
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            Text(
+                title,
+                color      = if (isSelected) CP_VIOLET else CP_TEXT,
+                fontWeight = FontWeight.Bold,
+                fontSize   = 15.sp
+            )
+            Text(subtitle, color = CP_TEXT_DIM.copy(alpha = 0.6f), fontSize = 11.sp)
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    price,
+                    color      = if (isSelected) CP_VIOLET else CP_TEXT,
+                    fontWeight = FontWeight.Black,
+                    fontSize   = 20.sp
+                )
+                Text(priceUnit, color = CP_TEXT_DIM.copy(alpha = 0.5f), fontSize = 11.sp,
+                    modifier = Modifier.padding(bottom = 3.dp, start = 2.dp))
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            features.forEach { feat ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(bottom = 5.dp)
+                ) {
+                    Icon(
+                        if (isSelected) Icons.Filled.CheckCircle else Icons.Outlined.CheckCircle,
+                        contentDescription = null,
+                        tint     = if (isSelected) CP_VIOLET else CP_TEXT_DIM.copy(alpha = 0.5f),
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        feat,
+                        color    = if (isSelected) CP_TEXT else CP_TEXT_DIM.copy(alpha = 0.7f),
+                        fontSize = 12.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Button(
+                onClick = onPurchase,
+                modifier = Modifier.fillMaxWidth().height(44.dp),
+                shape    = RoundedCornerShape(12.dp),
+                colors   = if (isSelected)
+                    ButtonDefaults.buttonColors(containerColor = CP_VIOLET)
+                else
+                    ButtonDefaults.buttonColors(containerColor = CP_SURFACE_HIGHEST),
+                elevation = ButtonDefaults.buttonElevation(
+                    defaultElevation = if (isSelected) 8.dp else 0.dp
+                )
+            ) {
+                Text(
+                    if (isSelected) "Langganan Sekarang" else "Pilih Plan",
+                    color      = if (isSelected) Color(0xFF25005A) else CP_TEXT,
+                    fontWeight = FontWeight.Bold,
+                    fontSize   = 12.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CpMiniPlanCard(
+    modifier: Modifier,
+    label: String,
+    price: String,
+    tier: String,
+    onPurchase: (String, String, String) -> Unit
+) {
+    Row(
+        modifier = modifier
+            .glassPanel(12f)
+            .clickable { onPurchase(tier, "Premium $label", price) }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column {
+            Text(label, color = CP_TEXT, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Text("Coba dulu", color = CP_TEXT_DIM.copy(alpha = 0.5f), fontSize = 10.sp)
+        }
+        Text(
+            price,
+            color      = CP_CYAN,
+            fontWeight = FontWeight.Black,
+            fontSize   = 13.sp
         )
+    }
+}
+
+// ─── Gift Code Section ─────────────────────────────────────────────────
+@Composable
+private fun CpGiftCodeSection(
+    inputCode: String,
+    onCodeChange: (String) -> Unit,
+    onRedeem: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .glassPanel()
+            .padding(16.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Filled.CardGiftcard,
+                contentDescription = null,
+                tint     = CP_CYAN,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                "Klaim Gift Code",
+                color      = CP_TEXT,
+                fontWeight = FontWeight.Bold,
+                fontSize   = 15.sp
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            "Masukkan kode premium dari admin atau event",
+            color    = CP_TEXT_DIM.copy(alpha = 0.6f),
+            fontSize = 12.sp
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value         = inputCode,
+                onValueChange = onCodeChange,
+                placeholder   = { Text("NIHONVIP2025", color = CP_TEXT_DIM.copy(alpha = 0.3f), fontSize = 13.sp) },
+                modifier      = Modifier.weight(1f).height(52.dp),
+                singleLine    = true,
+                textStyle     = LocalTextStyle.current.copy(
+                    color      = CP_VIOLET,
+                    fontWeight = FontWeight.Bold,
+                    fontSize   = 14.sp,
+                    letterSpacing = 1.sp
+                ),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor   = CP_VIOLET,
+                    unfocusedBorderColor = CP_OUTLINE.copy(alpha = 0.4f),
+                    focusedContainerColor   = CP_SURFACE.copy(alpha = 0.5f),
+                    unfocusedContainerColor = CP_SURFACE.copy(alpha = 0.3f)
+                ),
+                shape = RoundedCornerShape(12.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .background(
+                        Brush.linearGradient(listOf(CP_VIOLET_DIM, CP_VIOLET)),
+                        RoundedCornerShape(12.dp)
+                    )
+                    .clickable { onRedeem() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Filled.Send,
+                    contentDescription = "Klaim",
+                    tint     = Color(0xFF25005A),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    }
+}
+
+// ─── System Settings ───────────────────────────────────────────────────
+@Composable
+private fun CpSystemSettings(isDarkMode: Boolean, onToggleDark: () -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            "PENGATURAN SISTEM",
+            color       = CP_TEXT_DIM.copy(alpha = 0.5f),
+            fontSize    = 11.sp,
+            fontWeight  = FontWeight.Black,
+            letterSpacing = 2.sp,
+            modifier    = Modifier.padding(bottom = 10.dp)
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .glassPanel()
+        ) {
+            CpSettingsRow(
+                icon      = Icons.Filled.DarkMode,
+                iconTint  = CP_VIOLET,
+                title     = "Tema Gelap Sinematik",
+                subtitle  = "Nyaman ditonton di tempat gelap",
+                trailing  = {
+                    CpToggle(checked = isDarkMode, onToggle = onToggleDark)
+                }
+            )
+            CpDivider()
+            CpSettingsRow(
+                icon      = Icons.Filled.Notifications,
+                iconTint  = CP_CYAN,
+                title     = "Notifikasi Episode",
+                subtitle  = "Episode baru & live event",
+                trailing  = {
+                    CpToggle(checked = true, onToggle = {})
+                }
+            )
+            CpDivider()
+            CpSettingsRow(
+                icon      = Icons.Filled.Language,
+                iconTint  = CP_CRIMSON,
+                title     = "Bahasa Aplikasi",
+                subtitle  = "Bahasa Indonesia",
+                trailing  = {
+                    Icon(
+                        Icons.Filled.ChevronRight,
+                        contentDescription = null,
+                        tint = CP_TEXT_DIM.copy(alpha = 0.4f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            )
+            CpDivider()
+            CpSettingsRow(
+                icon      = Icons.Filled.Download,
+                iconTint  = CP_TEXT_DIM.copy(alpha = 0.7f),
+                title     = "Kualitas Unduhan",
+                subtitle  = "1080p • Auto-delete lama",
+                trailing  = {
+                    Icon(
+                        Icons.Filled.ChevronRight,
+                        contentDescription = null,
+                        tint = CP_TEXT_DIM.copy(alpha = 0.4f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun CpSettingsRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    iconTint: Color,
+    title: String,
+    subtitle: String,
+    trailing: @Composable () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .background(CP_SURFACE_HIGHEST, RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(20.dp))
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = CP_TEXT, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Text(subtitle, color = CP_TEXT_DIM.copy(alpha = 0.55f), fontSize = 11.sp)
+        }
+        trailing()
+    }
+}
+
+@Composable
+private fun CpDivider() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 70.dp)
+            .height(0.5.dp)
+            .background(CP_OUTLINE.copy(alpha = 0.2f))
+    )
+}
+
+@Composable
+private fun CpToggle(checked: Boolean, onToggle: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .width(44.dp)
+            .height(26.dp)
+            .background(
+                if (checked) CP_VIOLET else CP_SURFACE_HIGHEST,
+                RoundedCornerShape(50)
+            )
+            .border(1.dp, if (checked) CP_VIOLET.copy(alpha = 0.5f) else CP_OUTLINE.copy(alpha = 0.3f), RoundedCornerShape(50))
+            .clickable { onToggle() },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .padding(2.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .background(
+                        if (checked) Color(0xFF3F008E) else CP_TEXT_DIM.copy(alpha = 0.4f),
+                        CircleShape
+                    )
+                    .align(if (checked) Alignment.CenterEnd else Alignment.CenterStart)
+            )
+        }
+    }
+}
+
+// ─── Community Rules ───────────────────────────────────────────────────
+@Composable
+private fun CpCommunityRules() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .glassPanel()
+            .padding(16.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Shield, contentDescription = null,
+                tint = CP_VIOLET, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                "Aturan Komunitas NihonHua",
+                color      = CP_VIOLET,
+                fontWeight = FontWeight.Bold,
+                fontSize   = 13.sp
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        val rules = listOf(
+            "Dilarang spoiler episode yang belum tayang.",
+            "Tidak boleh komentar kasar, SARA, atau pornografi.",
+            "Dilarang spam atau promosi link ilegal.",
+            "Pelanggaran berakibat ban akun Google permanen."
+        )
+        rules.forEachIndexed { idx, rule ->
+            Row(modifier = Modifier.padding(vertical = 2.dp)) {
+                Text(
+                    "${idx + 1}.",
+                    color    = CP_CYAN.copy(alpha = 0.7f),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.width(18.dp)
+                )
+                Text(rule, color = CP_TEXT_DIM.copy(alpha = 0.7f), fontSize = 12.sp, lineHeight = 17.sp)
+            }
+        }
     }
 }
 
@@ -2875,7 +3410,7 @@ fun AdminPanelScreen(viewModel: AnimeViewModel) {
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
-                    Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f))
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Text("Manajemen Level & EXP User", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
@@ -2929,7 +3464,7 @@ fun AdminPanelScreen(viewModel: AnimeViewModel) {
                     if (comments.isEmpty()) {
                         item { Text("Belum ada komentar.") }
                     }
-                    items(comments) { c ->
+                    items(items = comments, key = { it.id }) { c ->
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
@@ -3016,11 +3551,11 @@ fun AdminPanelScreen(viewModel: AnimeViewModel) {
                         Text("Generate & Simpan Kode")
                     }
 
-                    Divider()
+                    HorizontalDivider()
 
                     Text("Daftar Kode yang Aktif", fontWeight = FontWeight.Bold)
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(codes) { c ->
+                        items(items = codes, key = { it.code }) { c ->
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Row(modifier = Modifier.padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                     Column {
@@ -3068,11 +3603,11 @@ fun AdminPanelScreen(viewModel: AnimeViewModel) {
                         Text("Blokir Permanen", color = Color.White)
                     }
 
-                    Divider()
+                    HorizontalDivider()
 
                     Text("Daftar Pengguna yang Diblokir", fontWeight = FontWeight.Bold)
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(blockedUsers) { b ->
+                        items(items = blockedUsers, key = { it.email }) { b ->
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Row(modifier = Modifier.padding(10.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                     Column {
@@ -3472,7 +4007,7 @@ fun UserProfileDialog(
                         )
 
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(gifPresets) { gifUrl ->
+                            items(items = gifPresets, key = { it }) { gifUrl ->
                                 Box(
                                     modifier = Modifier
                                         .size(64.dp)
@@ -3526,11 +4061,16 @@ fun UserProfileDialog(
                                     when {
                                         pickedImageUri != null -> {
                                             viewModel.updateUserProfileFromGallery(
-                                                editedDisplayName.trim(), pickedImageUri!!
+                                                editedDisplayName.trim(), pickedImageUri!!.toString()
                                             ) { success, msg ->
                                                 isSaving = false
-                                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                                                if (success) { isEditing = false; onDismiss() }
+                                                if (success) { 
+                                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                                    isEditing = false
+                                                    onDismiss() 
+                                                } else {
+                                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                                }
                                             }
                                         }
                                         selectedGifPreset != null -> {
@@ -3910,7 +4450,7 @@ fun NotificationsDialog(viewModel: AnimeViewModel, onDismiss: () -> Unit) {
                 Spacer(modifier = Modifier.height(8.dp))
 
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(notifications) { notif ->
+                    items(items = notifications, key = { it.id }) { notif ->
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()

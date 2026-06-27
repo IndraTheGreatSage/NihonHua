@@ -1,6 +1,7 @@
+@file:Suppress("DEPRECATION")
 package com.example
 
-import android.content.Intent
+import android.annotation.SuppressLint
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -21,14 +22,14 @@ import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
-import com.google.firebase.auth.FirebaseAuth
 
 class MainActivity : ComponentActivity() {
 
+    @Suppress("DEPRECATION")
     private var googleSignInClient: GoogleSignInClient? = null
     private lateinit var animeViewModel: AnimeViewModel
 
-    // Launcher untuk menerima hasil Google Sign-In
+    @Suppress("DEPRECATION")
     private val googleSignInLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -38,7 +39,7 @@ class MainActivity : ComponentActivity() {
             val idToken = account.idToken
             if (idToken != null) {
                 // Kirim ID Token ke ViewModel untuk diproses Firebase Auth
-                animeViewModel.handleFirebaseGoogleLogin(idToken) { success, msg ->
+                animeViewModel.handleFirebaseGoogleLogin(idToken) { _, msg ->
                     Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
                 }
             } else {
@@ -57,11 +58,14 @@ class MainActivity : ComponentActivity() {
 
         // Setup Google Sign-In safely
         try {
+            @SuppressLint("DiscouragedApi")
             val clientId = getString(resources.getIdentifier("default_web_client_id", "string", packageName))
+            @Suppress("DEPRECATION")
             val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
                 .requestIdToken(clientId)
                 .requestEmail()
                 .build()
+            @Suppress("DEPRECATION")
             googleSignInClient = GoogleSignIn.getClient(this, gso)
         } catch (e: Exception) {
             Toast.makeText(this, "Google Sign-In tidak tersedia: ${e.message}", Toast.LENGTH_LONG).show()

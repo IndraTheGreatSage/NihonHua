@@ -1,17 +1,14 @@
 package com.example.ui
 
 import android.app.Application
-import android.content.Context
-import android.net.Uri
-import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.*
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class AnimeViewModel(application: Application) : AndroidViewModel(application) {
     private val repo = AnimeRepository.getInstance(application)
 
@@ -29,11 +26,11 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedEpisode = MutableStateFlow<Episode?>(null)
     val selectedEpisode: StateFlow<Episode?> = _selectedEpisode.asStateFlow()
 
-    private val _isResolvingEpisode = MutableStateFlow(false)
-    val isResolvingEpisode: StateFlow<Boolean> = _isResolvingEpisode.asStateFlow()
-
     private val _selectedQuality = MutableStateFlow("1080p")
     val selectedQuality: StateFlow<String> = _selectedQuality.asStateFlow()
+
+    private val _isResolvingEpisode = MutableStateFlow(false)
+    val isResolvingEpisode: StateFlow<Boolean> = _isResolvingEpisode.asStateFlow()
 
     val currentComments: StateFlow<List<Comment>> = _selectedAnime
         .combine(_selectedEpisode) { anime, episode ->
@@ -53,9 +50,6 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
             if (user != null) repo.getWatchHistory(user.email) else flowOf(emptyList())
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-
-
 
     val downloads: StateFlow<List<OfflineDownload>> = repo.getDownloads()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -78,10 +72,6 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
     private val _inspectedProfile = MutableStateFlow<UserProfile?>(null)
     val inspectedProfile: StateFlow<UserProfile?> = _inspectedProfile.asStateFlow()
 
-    // State Google Sign-In (ID Token dari Activity dikirim ke sini)
-    private val _googleSignInError = MutableStateFlow<String?>(null)
-    val googleSignInError: StateFlow<String?> = _googleSignInError.asStateFlow()
-
     // Ad Management for non-premium users
     private val _shouldShowAd = MutableStateFlow(false)
     val shouldShowAd: StateFlow<Boolean> = _shouldShowAd.asStateFlow()
@@ -92,6 +82,15 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
     init {
         loadLatestShows()
         generateInitialNotifications()
+    }
+
+    // ── FIX: dedup shows by id, dedup episodes by episodeNumber ──────────────
+    private fun deduplicateShows(shows: List<AnimeVideo>): List<AnimeVideo> {
+        return shows.distinctBy { it.id }.map { anime ->
+            anime.copy(
+                episodes = anime.episodes.distinctBy { it.episodeNumber }
+            )
+        }
     }
 
     fun checkAdRequirement(): Boolean {
@@ -108,10 +107,6 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
     fun onAdWatched() {
         _shouldShowAd.value = false
         lastAdTime = System.currentTimeMillis()
-        val user = currentUser.value ?: return
-        viewModelScope.launch {
-            repo.addWatchMinutesAndSave(user.email, 60L)
-        }
     }
 
     fun dismissAd() {
@@ -122,21 +117,18 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                // Try to fetch from backend API first
                 val apiShows = ApiService.fetchAllAnime()
                 if (apiShows.isNotEmpty()) {
-                    _shows.value = apiShows
+                    _shows.value = deduplicateShows(apiShows)  // FIX: dedup applied
                 } else {
-                    // Fallback to local scraper if API returns empty
                     val scraped = AnichinScraper.getLatestShows()
-                    _shows.value = scraped
+                    _shows.value = deduplicateShows(scraped)   // FIX: dedup applied
                 }
-            } catch (e: Exception) {
-                // Fallback to local scraper on error
+            } catch (_: Exception) {
                 try {
                     val scraped = AnichinScraper.getLatestShows()
-                    _shows.value = scraped
-                } catch (e2: Exception) {
+                    _shows.value = deduplicateShows(scraped)   // FIX: dedup applied
+                } catch (_: Exception) {
                     _shows.value = emptyList()
                 }
             } finally {
@@ -147,26 +139,7 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectAnime(anime: AnimeVideo) {
         _selectedAnime.value = anime
-        anime.episodes.firstOrNull()?.let { selectEpisode(it) } ?: run {
-            _selectedEpisode.value = null
-        }
-        if (anime.episodes.isEmpty()) {
-            viewModelScope.launch {
-                _isLoading.value = true
-                try {
-                    val detail = ApiService.fetchAnimeDetail(anime.id)
-                    if (detail != null) {
-                        _selectedAnime.value = detail
-                        detail.episodes.firstOrNull()?.let { selectEpisode(it) } ?: run {
-                            _selectedEpisode.value = null
-                        }
-                        _shows.value = _shows.value.map { if (it.id == detail.id) detail else it }
-                    }
-                } finally {
-                    _isLoading.value = false
-                }
-            }
-        }
+        _selectedEpisode.value = anime.episodes.firstOrNull()
     }
 
     fun closeActiveWatchScreen() {
@@ -176,19 +149,6 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectEpisode(episode: Episode) {
         _selectedEpisode.value = episode
-        if (episode.videoUrl.startsWith("http", ignoreCase = true)) {
-            viewModelScope.launch {
-                _isResolvingEpisode.value = true
-                try {
-                    val resolvedUrl = ApiService.resolveEpisodeVideoUrl(episode.videoUrl)
-                    if (resolvedUrl.isNotBlank() && resolvedUrl != episode.videoUrl) {
-                        _selectedEpisode.value = episode.copy(videoUrl = resolvedUrl)
-                    }
-                } finally {
-                    _isResolvingEpisode.value = false
-                }
-            }
-        }
     }
 
     fun changeQuality(quality: String) {
@@ -199,18 +159,12 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
         _isDarkMode.value = !_isDarkMode.value
     }
 
-    /**
-     * Dipanggil dari Activity setelah Google Sign-In berhasil mendapat idToken.
-     * Gunakan GoogleSignIn.getSignedInAccountFromIntent() di Activity,
-     * lalu kirim account.idToken ke sini.
-     */
     fun handleFirebaseGoogleLogin(idToken: String, onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch {
             val success = repo.loginWithFirebaseGoogle(idToken)
             if (success) {
                 val user = repo.currentUser.value
                 onResult(true, "Selamat datang, ${user?.displayName ?: ""}!")
-                // Load anime data after successful login
                 loadLatestShows()
             } else {
                 onResult(false, "Akun Anda telah diblokir atau terjadi kesalahan autentikasi.")
@@ -218,47 +172,11 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Real Google Sign-In with Firebase
-    fun signInWithGoogle(context: android.content.Context) {
-        viewModelScope.launch {
-            try {
-                val googleSignInOptions = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
-                    com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
-                )
-                    .requestIdToken("295876523736-8rj2t9m8q7k5l4n3p1o2i3u4y5t6r7e8.apps.googleusercontent.com")
-                    .requestEmail()
-                    .build()
-
-                val googleSignInClient = com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(context, googleSignInOptions)
-                val signInIntent = googleSignInClient.signInIntent
-                
-                // This needs to be handled in Activity with startActivityForResult
-                // For now, show a message to use the manual fallback
-                android.widget.Toast.makeText(
-                    context,
-                    "Google Sign-In requires Activity integration. Use manual login for now.",
-                    android.widget.Toast.LENGTH_LONG
-                ).show()
-            } catch (e: Exception) {
-                android.widget.Toast.makeText(
-                    context,
-                    "Error: ${e.message}",
-                    android.widget.Toast.LENGTH_SHORT
-                ).show()
-            }
-        }
-    }
-
-    /**
-     * Fallback: login manual via email (untuk development / akun custom).
-     * Di production, sebaiknya dihapus dan hanya pakai Firebase.
-     */
     fun handleGoogleLogin(email: String, displayName: String, photoUrl: String, onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch {
             val success = repo.loginWithGoogle(email, displayName, photoUrl)
             if (success) {
                 onResult(true, "Selamat datang, $displayName!")
-                // Load anime data after successful login
                 loadLatestShows()
             } else {
                 onResult(false, "Akun Anda telah diblokir karena melanggar aturan komunitas!")
@@ -266,18 +184,8 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun handleLogout(context: android.content.Context) {
-        repo.logout(context)
-    }
-
-    fun saveProgress(
-        animeId: String, animeTitle: String, animeImage: String,
-        episodeNumber: String, progressPercent: Float,
-        progressSeconds: Long, totalSeconds: Long
-    ) {
-        viewModelScope.launch {
-            repo.saveWatchHistory(animeId, animeTitle, animeImage, episodeNumber, progressPercent, progressSeconds, totalSeconds)
-        }
+    fun handleLogout() {
+        repo.logout()
     }
 
     fun postComment(animeId: String, animeTitle: String, episodeNumber: String, content: String) {
@@ -340,32 +248,12 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Mengambil gambar dari URI galeri, mengkonversinya ke Base64,
-     * lalu menyimpannya ke profil user sebagai data URI (mendukung GIF!).
-     */
-    fun updateUserProfileFromGallery(displayName: String, imageUri: Uri, onResult: (Boolean, String) -> Unit) {
+    fun updateUserProfileFromGallery(displayName: String, imageUri: String, onResult: (Boolean, String) -> Unit) {
         val user = currentUser.value ?: return
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val context = getApplication<Application>().applicationContext
-                val contentResolver = context.contentResolver
-                val mimeType = contentResolver.getType(imageUri) ?: "image/jpeg"
-                val inputStream = contentResolver.openInputStream(imageUri)
-                val bytes = inputStream?.readBytes()
-                inputStream?.close()
-                if (bytes == null || bytes.isEmpty()) {
-                    withContext(Dispatchers.Main) { onResult(false, "Gagal membaca gambar!") }
-                    return@launch
-                }
-                val base64 = Base64.encodeToString(bytes, Base64.DEFAULT)
-                val dataUri = "data:$mimeType;base64,$base64"
-                val updated = user.copy(displayName = displayName, photoUrl = dataUri)
-                repo.updateProfile(updated)
-                withContext(Dispatchers.Main) { onResult(true, "Foto profil berhasil diperbarui!") }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) { onResult(false, "Error: ${e.message}") }
-            }
+        viewModelScope.launch {
+            val updated = user.copy(displayName = displayName, photoUrl = imageUri)
+            repo.updateProfile(updated)
+            onResult(true, "Profil berhasil diperbarui!")
         }
     }
 
@@ -428,15 +316,6 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { repo.removeBlockedUser(email) }
     }
 
-    private val _isAppModded = MutableStateFlow(false)
-    val isAppModded: StateFlow<Boolean> = _isAppModded.asStateFlow()
-
-    private val _isAppOutdated = MutableStateFlow(false)
-    val isAppOutdated: StateFlow<Boolean> = _isAppOutdated.asStateFlow()
-
-    fun setAppModded(modded: Boolean) { _isAppModded.value = modded }
-    fun setAppOutdated(outdated: Boolean) { _isAppOutdated.value = outdated }
-
     fun shareReviewToSocialMedia(animeTitle: String, rating: String, reviewText: String, onShareCompleted: (String) -> Unit) {
         val shareMsg = "Menonton $animeTitle dengan Rating $rating/10 di NihonHua! Ulasan: \"$reviewText\" #NihonHua #Anime #Donghua"
         onShareCompleted(shareMsg)
@@ -444,7 +323,7 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun generateInitialNotifications() {
         _notifications.value = listOf(
-            AppNotification(1, "Rilis Episode Baru", "Episode terbaru dari sumber utama sudah masuk. Cek daftar rilis hari ini.", System.currentTimeMillis() - 3600000),
+            AppNotification(1, "Rilis Episode Baru", "Battle Through The Heavens S5 Episode 101 telah rilis! Nonton sekarang dengan grafis 4K.", System.currentTimeMillis() - 3600000),
             AppNotification(2, "Rilis Episode Baru", "Renegade Immortal Episode 38 sudah tayang. Ikuti perjalanan kejam Wang Lin!", System.currentTimeMillis() - 7200000),
             AppNotification(3, "Komunitas Aktif", "Seseorang menyukai komentar Anda di Perfect World Episode 165.", System.currentTimeMillis() - 14400000)
         )

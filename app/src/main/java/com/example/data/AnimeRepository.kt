@@ -35,7 +35,7 @@ class AnimeRepository private constructor(context: Context) {
         var cumulativeExp = 0
         while (level < 1000) {
             val expForNextLevel = 100 * level * level
-            if (exp < cumulativeExp + expForNextLevel) break
+            if (exp < (cumulativeExp + expForNextLevel)) break
             cumulativeExp += expForNextLevel
             level++
         }
@@ -54,7 +54,7 @@ class AnimeRepository private constructor(context: Context) {
                     // Update displayName & photoUrl from latest Google account
                     val updated = profile.copy(
                         displayName = freshName,
-                        photoUrl = if (freshPhoto.isNotEmpty()) freshPhoto else profile.photoUrl
+                        photoUrl = freshPhoto.ifEmpty { profile.photoUrl },
                     )
                     profileDao.updateProfile(updated)
                     _currentUser.value = updated
@@ -157,7 +157,7 @@ class AnimeRepository private constructor(context: Context) {
             firestore.collection("users").document(profile.email)
                 .set(userProfileMap)
                 .await()
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             // Silent fail for sync errors
         }
     }
@@ -179,23 +179,17 @@ class AnimeRepository private constructor(context: Context) {
                     profileDao.updateProfile(mergedProfile)
                 }
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             // Silent fail for sync errors
         }
     }
 
-    fun logout(context: android.content.Context) {
-        // Sign out from Firebase
+    fun logout() {
         firebaseAuth.signOut()
-        // Sign out from Google Sign-In so user can pick different account
-        val gso = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
-            com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
-        ).requestEmail().build()
-        com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(context, gso).signOut()
         _currentUser.value = null
     }
 
-    fun getCurrentFirebaseUser(): FirebaseUser? = firebaseAuth.currentUser
+    fun getCurrentFirebaseUser(): com.google.firebase.auth.FirebaseUser? = firebaseAuth.currentUser
 
     // Profiles
     fun getUserProfile(email: String): Flow<UserProfile?> {
@@ -244,7 +238,7 @@ class AnimeRepository private constructor(context: Context) {
         totalSeconds: Long
     ) {
         val user = _currentUser.value ?: return
-        val id = "${user.email}_${animeId}_${episodeNumber}"
+        val id = "${user.email}_${animeId}_$episodeNumber"
         val history = WatchHistory(
             id = id,
             userEmail = user.email,
