@@ -271,6 +271,12 @@ class AnimeRepository private constructor(context: Context) {
         return commentDao.getAllComments()
     }
 
+    fun getCommentsForUser(email: String): Flow<List<Comment>> {
+        return commentDao.getAllComments().map { comments ->
+            comments.filter { it.userEmail == email }
+        }
+    }
+
     suspend fun addComment(animeId: String, animeTitle: String, episodeNumber: String, content: String) {
         val user = _currentUser.value ?: return
 

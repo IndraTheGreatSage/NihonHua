@@ -29,6 +29,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -218,6 +219,7 @@ private fun EpisodeWebPlayer(
 fun MainAppNavigation(
     viewModel: AnimeViewModel,
     onGoogleSignInRequest: () -> Unit,
+    onBackPressed: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -226,6 +228,16 @@ fun MainAppNavigation(
     val shouldShowAd by viewModel.shouldShowAd.collectAsState()
 
     var activeTab by remember { mutableStateOf("dashboard") }
+
+    // Handle system back button
+    BackHandler {
+        val selectedAnime = viewModel.selectedAnime.value
+        if (selectedAnime != null) {
+            viewModel.closeActiveWatchScreen()
+        } else {
+            onBackPressed()
+        }
+    }
 
     // Check ad requirement when tab changes
     LaunchedEffect(activeTab) {
@@ -330,34 +342,49 @@ fun MainAppNavigation(
                 )
             },
             bottomBar = {
-                NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 8.dp
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
-                    NavigationBarItem(
-                        selected = activeTab == "dashboard",
-                        onClick = { activeTab = "dashboard" },
-                        icon = { Icon(Icons.Filled.Home, contentDescription = "Dashboard") },
-                        label = { Text("Dashboard") }
-                    )
-                    NavigationBarItem(
-                        selected = activeTab == "search",
-                        onClick = { activeTab = "search" },
-                        icon = { Icon(Icons.Filled.Search, contentDescription = "Pencarian") },
-                        label = { Text("Cari") }
-                    )
-                    NavigationBarItem(
-                        selected = activeTab == "downloads",
-                        onClick = { activeTab = "downloads" },
-                        icon = { Icon(Icons.Filled.Download, contentDescription = "Unduhan") },
-                        label = { Text("Unduhan") }
-                    )
-                    NavigationBarItem(
-                        selected = activeTab == "settings",
-                        onClick = { activeTab = "settings" },
-                        icon = { Icon(Icons.Filled.Settings, contentDescription = "Settings") },
-                        label = { Text("Fitur & Code") }
-                    )
+                    NavigationBar(
+                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                        tonalElevation = 0.dp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(24.dp))
+                    ) {
+                        NavigationBarItem(
+                            selected = activeTab == "dashboard",
+                            onClick = { activeTab = "dashboard" },
+                            icon = { Icon(Icons.Filled.Home, contentDescription = "Dashboard") },
+                            label = { Text("Dashboard") }
+                        )
+                        NavigationBarItem(
+                            selected = activeTab == "search",
+                            onClick = { activeTab = "search" },
+                            icon = { Icon(Icons.Filled.Search, contentDescription = "Pencarian") },
+                            label = { Text("Cari") }
+                        )
+                        NavigationBarItem(
+                            selected = activeTab == "downloads",
+                            onClick = { activeTab = "downloads" },
+                            icon = { Icon(Icons.Filled.Download, contentDescription = "Unduhan") },
+                            label = { Text("Unduhan") }
+                        )
+                        NavigationBarItem(
+                            selected = activeTab == "history",
+                            onClick = { activeTab = "history" },
+                            icon = { Icon(Icons.Filled.History, contentDescription = "Histori") },
+                            label = { Text("Histori") }
+                        )
+                        NavigationBarItem(
+                            selected = activeTab == "settings",
+                            onClick = { activeTab = "settings" },
+                            icon = { Icon(Icons.Filled.Settings, contentDescription = "Settings") },
+                            label = { Text("Fitur & Code") }
+                        )
+                    }
                 }
             }
         ) { padding ->
@@ -371,6 +398,7 @@ fun MainAppNavigation(
                     "dashboard" -> DashboardScreen(viewModel = viewModel)
                     "search" -> AdvancedSearchScreen(viewModel = viewModel)
                     "downloads" -> DownloadsScreen(viewModel = viewModel)
+                    "history" -> HistoryScreen(viewModel = viewModel)
                     "settings" -> SettingsScreen(viewModel = viewModel)
                     "admin" -> AdminPanelScreen(viewModel = viewModel)
                 }
@@ -406,6 +434,23 @@ fun MainAppNavigation(
     }
     }
 }
+
+fun Row(verticalAlignment: Alignment.Vertical, content: () -> Unit) {}
+
+fun Column(content: () -> Unit) {}
+
+fun Column(content: () -> Unit) {}
+
+fun Column(content: () -> Unit) {}
+
+fun TopAppBar(
+    title: () -> Unit,
+    actions: () -> Unit,
+    colors: androidx.compose.material3.TopAppBarColors
+) {
+}
+
+fun Box(modifier: Modifier, content: @Composable () -> Unit) {}
 
 // 1. LOGIN SCREEN WITH REAL GOOGLE AUTH
 @Composable
@@ -668,7 +713,7 @@ fun DashboardScreen(viewModel: AnimeViewModel) {
     var selectedFilter by remember { mutableStateOf("Semua") }
 
     if (isLoading) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
         }
     } else {
@@ -1386,12 +1431,12 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                                 )
                         )
                         
-                        // Close/Back button in top-left
+                        // Close/Back button in top-left (moved down to avoid notification bar)
                         IconButton(
                             onClick = { viewModel.closeActiveWatchScreen() },
                             modifier = Modifier
                                 .align(Alignment.TopStart)
-                                .padding(12.dp)
+                                .padding(top = 40.dp, start = 12.dp)
                                 .background(Color.Black.copy(alpha = 0.72f), CircleShape)
                         ) {
                             Icon(Icons.Filled.ArrowBack, contentDescription = "Kembali", tint = Color.White)
@@ -1661,7 +1706,8 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(Color.Black)
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .padding(top = 40.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(onClick = { isWatching = false }) {
@@ -2353,6 +2399,192 @@ fun DownloadsScreen(viewModel: AnimeViewModel) {
     }
 }
 
+// 6. HISTORY SCREEN (Watch History + Comment History)
+@Composable
+fun HistoryScreen(viewModel: AnimeViewModel) {
+    val watchHistory by viewModel.watchHistory.collectAsState(initial = emptyList())
+    val currentUser by viewModel.currentUser.collectAsState()
+    val allCommentsState = viewModel.getAllCommentsForUser(currentUser?.email ?: "")
+    val allComments by allCommentsState.collectAsState()
+    
+    var selectedTab by remember { mutableStateOf("watch") }
+    
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Text("Riwayat Aktivitas", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // Tab selector
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterChip(
+                selected = selectedTab == "watch",
+                onClick = { selectedTab = "watch" },
+                label = { Text("Tontonan") },
+                leadingIcon = if (selectedTab == "watch") {
+                    { Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                } else null
+            )
+            FilterChip(
+                selected = selectedTab == "comments",
+                onClick = { selectedTab = "comments" },
+                label = { Text("Komentar") },
+                leadingIcon = if (selectedTab == "comments") {
+                    { Icon(Icons.Filled.ChatBubble, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                } else null
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        if (selectedTab == "watch") {
+            if (watchHistory.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Filled.History, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Belum ada riwayat tontonan", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                    }
+                }
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(items = watchHistory, key = { it.id }) { history ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                AsyncImage(
+                                    model = history.animeImage,
+                                    contentDescription = history.animeTitle,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(70.dp, 90.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        history.animeTitle,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        "Episode ${history.episodeNumber}",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        "Progress: ${String.format("%02d:%02d", history.progressSeconds / 60, history.progressSeconds % 60)}",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    LinearProgressIndicator(
+                                        progress = history.progressPercent.coerceIn(0f, 1f),
+                                        modifier = Modifier.fillMaxWidth().height(4.dp),
+                                        color = MaterialTheme.colorScheme.primary,
+                                        trackColor = MaterialTheme.colorScheme.surfaceVariant
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                IconButton(onClick = {
+                                    // Resume watching
+                                }) {
+                                    Icon(Icons.Filled.PlayArrow, contentDescription = "Lanjutkan", tint = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            if (allComments.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Filled.ChatBubble, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Belum ada riwayat komentar", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                    }
+                }
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(items = allComments, key = { it.id }) { comment ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    AsyncImage(
+                                        model = comment.userPhotoUrl,
+                                        contentDescription = comment.userDisplayName,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(CircleShape)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            comment.userDisplayName,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp
+                                        )
+                                        Text(
+                                            "${comment.animeTitle} • EP ${comment.episodeNumber}",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                        )
+                                    }
+                                    Text(
+                                        SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(comment.timestamp)),
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    comment.content,
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onBackground
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Filled.ThumbUp, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("${comment.likes}", fontSize = 12.sp)
+                                    }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Filled.ThumbDown, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("${comment.dislikes}", fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 // ─── Cinematic Pulse color tokens ─────────────────────────────────────
 private val CP_BG           = Color(0xFF0B1326)
 private val CP_SURFACE      = Color(0xFF171F33)
@@ -2386,6 +2618,11 @@ fun SettingsScreen(viewModel: AnimeViewModel) {
     var activePurchasePrice by remember { mutableStateOf("") }
     var activePurchaseTitle by remember { mutableStateOf("") }
     var selectedPlan        by remember { mutableStateOf("YEARLY") }
+    
+    var showLanguageDialog by remember { mutableStateOf(false) }
+    var showQualityDialog by remember { mutableStateOf(false) }
+    var selectedLanguage by remember { mutableStateOf("Indonesia") }
+    var selectedQuality by remember { mutableStateOf("1080p") }
 
     Box(
         modifier = Modifier
@@ -2433,7 +2670,14 @@ fun SettingsScreen(viewModel: AnimeViewModel) {
             }
 
             item {
-                CpSystemSettings(isDarkMode = isDarkMode, onToggleDark = { viewModel.toggleDarkMode() })
+                CpSystemSettings(
+                    isDarkMode = isDarkMode,
+                    onToggleDark = { viewModel.toggleDarkMode() },
+                    selectedLanguage = selectedLanguage,
+                    showLanguageDialog = { showLanguageDialog = true },
+                    selectedQuality = selectedQuality,
+                    showQualityDialog = { showQualityDialog = true }
+                )
             }
 
             item {
@@ -2453,21 +2697,105 @@ fun SettingsScreen(viewModel: AnimeViewModel) {
                 ) {
                     Icon(Icons.Filled.Logout, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Keluar dari Akun", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text("Keluar", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    "NihonHua v1.0 • Cinematic Pulse UI",
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Center,
-                    fontSize  = 11.sp,
-                    color     = CP_TEXT_DIM.copy(alpha = 0.4f),
-                    fontWeight = FontWeight.Medium,
-                    letterSpacing = 0.5.sp
-                )
+            }
+            
+            item {
+                Spacer(modifier = Modifier.height(20.dp))
             }
         }
-
+        
+        // Language Selection Dialog
+        if (showLanguageDialog) {
+            AlertDialog(
+                onDismissRequest = { showLanguageDialog = false },
+                title = { Text("Pilih Bahasa", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column {
+                        listOf("Indonesia", "English", "日本語").forEach { lang ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        selectedLanguage = lang
+                                        showLanguageDialog = false
+                                        Toast.makeText(context, "Bahasa diubah ke $lang", Toast.LENGTH_SHORT).show()
+                                    }
+                                    .padding(vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = selectedLanguage == lang,
+                                    onClick = {
+                                        selectedLanguage = lang
+                                        showLanguageDialog = false
+                                        Toast.makeText(context, "Bahasa diubah ke $lang", Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(lang)
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showLanguageDialog = false }) {
+                        Text("Tutup")
+                    }
+                }
+            )
+        }
+        
+        // Download Quality Selection Dialog
+        if (showQualityDialog) {
+            AlertDialog(
+                onDismissRequest = { showQualityDialog = false },
+                title = { Text("Pilih Kualitas Unduhan", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column {
+                        listOf("360p", "480p", "720p", "1080p", "4K").forEach { quality ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        selectedQuality = quality
+                                        showQualityDialog = false
+                                        Toast.makeText(context, "Kualitas unduhan diubah ke $quality", Toast.LENGTH_SHORT).show()
+                                    }
+                                    .padding(vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = selectedQuality == quality,
+                                    onClick = {
+                                        selectedQuality = quality
+                                        showQualityDialog = false
+                                        Toast.makeText(context, "Kualitas unduhan diubah ke $quality", Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(quality)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    if (quality == "360p") "• Hemat kuota"
+                                    else if (quality == "4K") "• Kualitas terbaik"
+                                    else "",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                )
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showQualityDialog = false }) {
+                        Text("Tutup")
+                    }
+                }
+            )
+        }
+        
         if (activePurchaseTier != null) {
             PremiumPaymentDialog(
                 tier      = activePurchaseTier!!,
@@ -2925,7 +3253,14 @@ private fun CpGiftCodeSection(
 
 // ─── System Settings ───────────────────────────────────────────────────
 @Composable
-private fun CpSystemSettings(isDarkMode: Boolean, onToggleDark: () -> Unit) {
+private fun CpSystemSettings(
+    isDarkMode: Boolean,
+    onToggleDark: () -> Unit,
+    selectedLanguage: String,
+    showLanguageDialog: () -> Unit,
+    selectedQuality: String,
+    showQualityDialog: () -> Unit
+) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             "PENGATURAN SISTEM",
@@ -2965,7 +3300,7 @@ private fun CpSystemSettings(isDarkMode: Boolean, onToggleDark: () -> Unit) {
                 icon      = Icons.Filled.Language,
                 iconTint  = CP_CRIMSON,
                 title     = "Bahasa Aplikasi",
-                subtitle  = "Bahasa Indonesia",
+                subtitle  = selectedLanguage,
                 trailing  = {
                     Icon(
                         Icons.Filled.ChevronRight,
@@ -2973,14 +3308,15 @@ private fun CpSystemSettings(isDarkMode: Boolean, onToggleDark: () -> Unit) {
                         tint = CP_TEXT_DIM.copy(alpha = 0.4f),
                         modifier = Modifier.size(20.dp)
                     )
-                }
+                },
+                onClick = showLanguageDialog
             )
             CpDivider()
             CpSettingsRow(
                 icon      = Icons.Filled.Download,
                 iconTint  = CP_TEXT_DIM.copy(alpha = 0.7f),
                 title     = "Kualitas Unduhan",
-                subtitle  = "1080p • Auto-delete lama",
+                subtitle  = "$selectedQuality • Auto-delete lama",
                 trailing  = {
                     Icon(
                         Icons.Filled.ChevronRight,
@@ -2988,7 +3324,8 @@ private fun CpSystemSettings(isDarkMode: Boolean, onToggleDark: () -> Unit) {
                         tint = CP_TEXT_DIM.copy(alpha = 0.4f),
                         modifier = Modifier.size(20.dp)
                     )
-                }
+                },
+                onClick = showQualityDialog
             )
         }
     }
@@ -3000,12 +3337,14 @@ private fun CpSettingsRow(
     iconTint: Color,
     title: String,
     subtitle: String,
-    trailing: @Composable () -> Unit
+    trailing: @Composable () -> Unit,
+    onClick: () -> Unit = {}
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = 16.dp, vertical = 14.dp)
+            .clickable { onClick() },
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
@@ -4410,7 +4749,7 @@ fun SocialShareDialog(
         onDismissRequest = onDismiss,
         title = { Text("Bagikan Ulasan") },
         text = {
-            Column {
+            androidx.compose.foundation.layout.Column {
                 Text("Beri Rating:")
                 OutlinedTextField(value = ratingVal, onValueChange = { ratingVal = it }, modifier = Modifier.fillMaxWidth())
                 Spacer(modifier = Modifier.height(8.dp))

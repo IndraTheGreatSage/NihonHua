@@ -51,6 +51,11 @@ class AnimeViewModel(application: Application) : AndroidViewModel(application) {
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    fun getAllCommentsForUser(email: String): StateFlow<List<Comment>> {
+        return repo.getCommentsForUser(email)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }
+
     val downloads: StateFlow<List<OfflineDownload>> = repo.getDownloads()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
