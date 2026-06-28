@@ -435,23 +435,6 @@ fun MainAppNavigation(
     }
 }
 
-fun Row(verticalAlignment: Alignment.Vertical, content: () -> Unit) {}
-
-fun Column(content: () -> Unit) {}
-
-fun Column(content: () -> Unit) {}
-
-fun Column(content: () -> Unit) {}
-
-fun TopAppBar(
-    title: () -> Unit,
-    actions: () -> Unit,
-    colors: androidx.compose.material3.TopAppBarColors
-) {
-}
-
-fun Box(modifier: Modifier, content: @Composable () -> Unit) {}
-
 // 1. LOGIN SCREEN WITH REAL GOOGLE AUTH
 @Composable
 fun LoginScreen(
@@ -1361,7 +1344,6 @@ fun StreamingWatchScreen(viewModel: AnimeViewModel) {
     val quality by viewModel.selectedQuality.collectAsState()
     val comments by viewModel.currentComments.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
-    val isResolvingEpisode by viewModel.isResolvingEpisode.collectAsState()
 
     val context = LocalContext.current
 
@@ -3530,7 +3512,7 @@ fun PremiumPaymentDialog(
                         val ctx = LocalContext.current
                         val qrisId = ctx.resources.getIdentifier("qris_payment", "drawable", ctx.packageName)
                         if (qrisId != 0) {
-                            androidx.compose.foundation.Image(
+                            Image(
                                 painter = androidx.compose.ui.res.painterResource(id = qrisId),
                                 contentDescription = "QRIS Code",
                                 modifier = Modifier
@@ -3543,7 +3525,7 @@ fun PremiumPaymentDialog(
                                 modifier = Modifier.fillMaxWidth().height(300.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("Gambar QRIS tidak ditemukan.\nSilakan hubungi admin.", color = Color.Gray, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                Text("Gambar QRIS tidak ditemukan.\nSilakan hubungi admin.", color = Color.Gray, textAlign = TextAlign.Center)
                             }
                         }
                     }
