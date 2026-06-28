@@ -1,41 +1,105 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Dark background circle -->
+    <!-- Soft ambient glow behind lotus -->
     <path
-        android:pathData="M54,54m-54,0a54,54 0,1 1,108 0a54,54 0,1 1,-108 0"
-        android:fillColor="#0B0E11"/>
+        android:pathData="M54,54 m-26,0 a26,26 0 1,1 52,0 a26,26 0 1,1 -52,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="0.5"
+                android:centerY="0.5"
+                android:gradientRadius="0.5">
+                <item android:offset="0" android:color="#25D4B896"/>
+                <item android:offset="1" android:color="#00D4B896"/>
+            </gradient>
+        </aapt:attr>
+    </path>
 
-    <!-- Outer glow ring (gold) -->
+    <!-- Left petal -->
     <path
-        android:pathData="M54,54m-40,0a40,40 0,1 1,80 0a40,40 0,1 1,-80 0"
-        android:fillColor="#00000000"
-        android:strokeColor="#FFB300"
-        android:strokeWidth="1.5"
-        android:strokeAlpha="0.6"/>
+        android:pathData="M54,72 C48,68 28,60 20,46 C26,34 42,46 54,58 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="20" android:startY="46"
+                android:endX="54"   android:endY="72">
+                <item android:offset="0" android:color="#FF9A806A"/>
+                <item android:offset="1" android:color="#FFD4B896"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Left petal stroke -->
+    <path
+        android:pathData="M54,72 C48,68 28,60 20,46 C26,34 42,46 54,58 Z"
+        android:strokeColor="#80F5E6CC"
+        android:strokeWidth="1"
+        android:fillColor="#00000000"/>
 
-    <!-- Inner gradient circle (red-dark) -->
+    <!-- Right petal -->
     <path
-        android:pathData="M54,54m-32,0a32,32 0,1 1,64 0a32,32 0,1 1,-64 0"
-        android:fillColor="#1A0A00"/>
+        android:pathData="M54,72 C60,68 80,60 88,46 C82,34 66,46 54,58 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="88" android:startY="46"
+                android:endX="54"   android:endY="72">
+                <item android:offset="0" android:color="#FF9A806A"/>
+                <item android:offset="1" android:color="#FFD4B896"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Right petal stroke -->
+    <path
+        android:pathData="M54,72 C60,68 80,60 88,46 C82,34 66,46 54,58 Z"
+        android:strokeColor="#80F5E6CC"
+        android:strokeWidth="1"
+        android:fillColor="#00000000"/>
 
-    <!-- N letter left stroke -->
+    <!-- Centre petal (tall upward flame) -->
     <path
-        android:pathData="M34,38L34,70L39,70L39,48L52,70L57,70L57,38L52,38L52,60L39,38Z"
-        android:fillColor="#E53935"/>
+        android:pathData="M54,72 C50,60 46,44 54,22 C62,44 58,60 54,72 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="54" android:startY="72"
+                android:endX="54"   android:endY="22">
+                <item android:offset="0" android:color="#FFD4B896"/>
+                <item android:offset="0.5" android:color="#FFE8D0B0"/>
+                <item android:offset="1" android:color="#FFF5E6CC"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Centre petal stroke -->
+    <path
+        android:pathData="M54,72 C50,60 46,44 54,22 C62,44 58,60 54,72 Z"
+        android:strokeColor="#CCF5E6CC"
+        android:strokeWidth="1"
+        android:fillColor="#00000000"/>
 
-    <!-- H letter -->
+    <!-- Bright highlight dot at centre tip -->
     <path
-        android:pathData="M61,38L61,70L66,70L66,56L75,56L75,70L80,70L80,38L75,38L75,52L66,52L66,38Z"
-        android:fillColor="#FFB300"/>
+        android:pathData="M54,22 m-3,0 a3,3 0 1,1 6,0 a3,3 0 1,1 -6,0"
+        android:fillColor="#FFFFF6E8"/>
 
-    <!-- Decorative dot accent -->
+    <!-- Soft outer glow at tip -->
     <path
-        android:pathData="M54,76m-2,0a2,2 0,1 1,4 0a2,2 0,1 1,-4 0"
-        android:fillColor="#FFB300"/>
+        android:pathData="M54,22 m-5.5,0 a5.5,5.5 0 1,1 11,0 a5.5,5.5 0 1,1 -11,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="0.5"
+                android:centerY="0.5"
+                android:gradientRadius="0.5">
+                <item android:offset="0" android:color="#60FFFFFF"/>
+                <item android:offset="1" android:color="#00FFFFFF"/>
+            </gradient>
+        </aapt:attr>
+    </path>
 
 </vector>
