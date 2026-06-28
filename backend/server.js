@@ -267,7 +267,6 @@ async function scrapeAnichin(maxPages = 15) {
                 });
             });
 
-            page++;
             await sleep(3000); // sopan ke Cloudflare
         } catch (err) {
             console.error(`[Anichin] Page ${page} error:`, err.message);
@@ -424,10 +423,10 @@ async function runBackgroundScraper() {
     console.log('=== Background Scraper Started ===');
     try {
         // Anichin → Donghua
-        const donghuaData = await scrapeAnichin(15);
+        const donghuaData = await scrapeAnichin(40);
 
         // Otakudesu → Anime
-        const animeData = await scrapeOtakudesu(10);
+        const animeData = await scrapeOtakudesu(25);
 
         // Gabung, deduplicate by ID dulu, lalu by title
         const combined = uniqueByTitle(uniqueById([...donghuaData, ...animeData]));
